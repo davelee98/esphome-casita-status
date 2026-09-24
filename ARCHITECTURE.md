@@ -1,14 +1,14 @@
 # Casita Status Board Architecture
 
 Status: Proposed  
-Version: 0.1  
-Last updated: 2026-09-22
+Version: 0.8
+Last updated: 2026-09-24
 
 ## 1. Purpose
 
 This document defines the architecture for using the ESPHome Starter Kit Casita LED and buzzer module as a semantic status board.
 
-The system presents statuses and numeric ranges through four logical LED groups. Callers work with group names, labels, values, and a small set of display states. They do not work with physical LED numbers. A rendering layer translates the semantic state into colors, fill levels, and animation across the Casita module's ten addressable RGB LEDs.
+The system presents statuses and typed numeric measurements through four logical LED groups. Callers work with group names, integer statuses, measurements, and a small set of meta-states. They do not work with physical LED numbers. A translation layer maps measurements to status integers, and a rendering layer maps those statuses to colors, fill counts, and animation across the Casita module's ten addressable RGB LEDs.
 
 The architecture is intended to be:
 
@@ -25,9 +25,10 @@ The architecture is intended to be:
 
 - The Casita module's ten WS2812 RGB LEDs.
 - Four fixed logical LED groups.
-- Six ordered status levels derived from the AIR-1/EPA AQI scale.
+- Six ordered integer statuses derived from the AIR-1/EPA AQI scale.
 - Three meta-states: Off, Unknown/Unavailable, and Initializing.
-- Label-to-level and numeric-range-to-level mappings.
+- Direct integer statuses and CO2-, AQI-, and VOC-to-status lookup tables.
+- Group sources: sensors attached to the device, Home Assistant entities, and action-driven values.
 - Fill, color, brightness, and animation rendering.
 - ESPHome and Home Assistant integration boundaries.
 - State precedence, transition, validation, and test requirements.
@@ -38,7 +39,7 @@ The architecture is intended to be:
 - Decorative or entertainment lighting effects.
 - User-defined physical group geometry.
 - Overlapping logical groups.
-- Audio/buzzer behavior. The buzzer may be added later as another output of the same semantic state model.
+- Audio/buzzer behavior. Status-board states never activate the buzzer; any buzzer feature is an independent subsystem.
 - A fixed assignment of home-automation domains to the four groups. Domain assignments remain configuration choices.
 
 ## 3. Source hardware
@@ -111,14 +112,14 @@ The `top` group wraps around the end of the WS2812 chain. That fact must remain 
 
 ### 6.1 Semantic interface
 
-Callers set a semantic label, a numeric value with a mapping profile, or a meta-state. Callers never set pixels or colors directly.
+Callers set an integer status from 1 through 6, a typed numeric measurement, or a meta-state. Callers never set named normal states, pixels, or colors directly.
 
 Examples:
 
 ```text
-set_label(group="left", label="warning", profile="home_status")
-set_value(group="right", value=72, profile="percentage")
-set_meta(group="top", state="initializing")
+set_value(group="top", value=4)    # top is configured as status
+set_value(group="right", value=72) # right is configured as aqi
+set_unavailable(group="top")
 ```
 
 ### 6.2 One rendering owner
@@ -135,26 +136,27 @@ This prevents:
 
 ### 6.3 Validity is separate from severity
 
-A valid measurement resolves to one of six ordered levels. Off, Unknown/Unavailable, and Initializing describe the condition of the data or group, not its severity.
+A valid measurement resolves to one of six ordered integer statuses. Off, Unknown/Unavailable, and Initializing describe the condition of the data or group, not its severity.
 
 ### 6.4 Redundant visual encoding
 
-Color is not the only carrier of meaning. Three-LED groups also use fill count, while higher levels and meta-states use animation. This improves readability through a diffuser and for users with color-vision deficiencies.
+Color is not the only carrier of meaning. Three-LED groups also use fill count, while higher statuses and meta-states use animation. This improves readability through a diffuser and for users with color-vision deficiencies.
 
-### 6.5 Configuration over branching logic
+### 6.5 Fixed version 1 policy
 
-Thresholds, label aliases, brightness, timing, and escalation behavior belong in profiles. The renderer operates on normalized group states and does not contain domain-specific sensor logic.
+The measurement lookup tables, palette, fill rules, effects, and animation timings are fixed component policy in version 1. Global brightness is the only exposed visual setting. The renderer operates on normalized integer statuses and does not contain domain-specific sensor logic.
 
 ## 7. System context
 
 ```text
- Home Assistant       Local ESPHome sensors       Device lifecycle
-       |                        |                         |
-       +------------------------+-------------------------+
+ Local ESPHome     Home Assistant entities    Automations and     Device lifecycle,
+ sensors           (homeassistant sensors)    native API actions  API connection
+       |                    |                        |                   |
+       +--------------------+------------------------+-------------------+
                                 |
-                         Input adapters
+                   Source bindings and actions
                                 |
-                  label/range profile normalization
+                    typed value translation
                                 |
                         Per-group state model
                                 |
@@ -169,8 +171,8 @@ Thresholds, label aliases, brightness, timing, and escalation behavior belong in
 
 The system separates policy from mechanism:
 
-- Input adapters know how to receive data.
-- Mapping profiles know what labels and ranges mean.
+- Source bindings and actions know how to receive data and how its freshness is judged (Section 8.5).
+- Input translators know how `status`, `co2`, `aqi`, and `voc` values become integers from 1 through 6.
 - The state resolver decides the current display state.
 - The renderer knows how states appear on a particular group geometry.
 - The hardware driver knows how to transmit pixels.
@@ -185,80 +187,126 @@ Each group is always in exactly one of these nine resolved states:
 Off
 UnknownUnavailable
 Initializing
-Level1
-Level2
-Level3
-Level4
-Level5
-Level6
+1
+2
+3
+4
+5
+6
 ```
 
-There are no additional public meta-states.
+The six normal statuses are public integers only. An implementation may use internal enum constants, but those names are not part of the configuration or automation interface. There are no additional public meta-states.
 
 ### 8.2 Source state
 
-The resolver should derive the display state from a compact source model instead of allowing contradictory state flags:
+The resolver derives the display state from one configured input type and one source per group (Section 8.5). Every source submits values through the same internal update path.
 
 ```text
-GroupSourceState
-  enabled: boolean
-  initializing: boolean
-  valid: boolean
-  level: 1..6 when valid
-  source_value: optional number
-  source_label: optional string
-  updated_at: monotonic timestamp
+GroupRuntimeState
+  display_state: signed integer
+    -2 = Initializing
+    -1 = UnknownUnavailable
+     0 = Off
+    1..6 = normal status
+  source_value: optional number, diagnostics only
+  last_received_at: optional monotonic timestamp
+  last_valid_at: optional monotonic timestamp
+  resolved_since: monotonic timestamp
 ```
 
-The source value and label are diagnostic metadata. The renderer consumes only the resolved display state.
+`input_type` and the source kind are immutable group configuration rather than duplicated runtime state. The initialization deadline is derived from `resolved_since +` the group's initialization window (Section 8.5). TTL is derived from the source kind and configured type unless the group overrides it. The renderer consumes only `display_state`, so contradictory combinations of `enabled`, `valid`, `phase`, and `status` cannot exist.
+
+The signed values are a private C++ representation, not public action values. Public diagnostics continue to use `off`, `unknown_unavailable`, `initializing`, and `1` through `6`. Age checks use rollover-safe unsigned monotonic subtraction. The component loop compares the current state and timestamps rather than scheduling expiry callbacks that could outlive the state they describe.
 
 ### 8.3 Resolution order
 
 The resolver applies this order:
 
 ```text
-if enabled is false:
-    Off
-else if initializing is true:
-    Initializing
-else if valid is false:
-    UnknownUnavailable
-else:
-    Level1 through Level6
+display_state == 0       -> Off
+display_state == -2      -> Initializing
+display_state == -1      -> UnknownUnavailable
+display_state in 1..6    -> integer status 1 through 6
 ```
 
-Off is an explicit configuration choice. Initializing means a source is expected to become ready. Unknown/Unavailable means no trustworthy value is currently available.
+Off is exclusively the result of `enabled: false`. Initializing means the group is waiting for its first valid update before the global initialization deadline. Unknown/Unavailable means no trustworthy current value is available.
 
 ### 8.4 State transitions
 
 ```text
-Boot or source start       -> Initializing
-First valid input          -> Level1..Level6
-Input becomes invalid      -> UnknownUnavailable
-Source exceeds its TTL     -> UnknownUnavailable
-Source begins reinitializing -> Initializing
-Group explicitly disabled -> Off
-Group explicitly enabled  -> Initializing or UnknownUnavailable
+Boot or component restart              -> Initializing
+Home Assistant connects (HA source)    -> Initializing
+First valid input                      -> integer status 1..6
+Input becomes invalid                  -> UnknownUnavailable
+Source exceeds its TTL                 -> UnknownUnavailable
+Home Assistant disconnects (HA source) -> UnknownUnavailable
+Group explicitly disabled              -> Off
+Group explicitly enabled               -> Initializing
 ```
 
-The architecture does not expose a separate Stale state. A configured time-to-live may still be used internally; expiry resolves to Unknown/Unavailable.
+Disabling a group invalidates its current status and drops value updates received while disabled. Re-enabling always starts a fresh initialization window; it never reveals a pre-disable value as current.
 
-## 9. Six-level scale
+The first valid update ends Initializing. If the group's initialization deadline is reached first, the group becomes Unknown/Unavailable. Initializing is entered only by lifecycle events: boot, re-enable, component restart, or, for Home Assistant-sourced groups, a Home Assistant connection. Invalid input, explicit Unknown/Unavailable, disablement, TTL expiry, and Home Assistant disconnection transition immediately. The architecture does not expose a separate Stale state.
 
-The default six-level profile adopts the semantic ordering and simplified RGB values used by Apollo AIR-1. Those meanings originate in the U.S. EPA AQI scale. Other profiles may use different labels and thresholds while retaining the same ordered level numbers.
+### 8.5 Sources and freshness
 
-| Level | Default meaning | Color | RGB | Three-LED fill | Default effect |
-|---:|---|---|---|---:|---|
-| 1 | Good | Green | `0, 255, 0` | 1 | Steady |
-| 2 | Moderate | Yellow | `255, 255, 0` | 2 | Steady |
-| 3 | Unhealthy for sensitive groups | Orange | `255, 128, 0` | 3 | Steady |
-| 4 | Unhealthy | Red | `255, 0, 0` | 3 | Steady |
-| 5 | Very unhealthy | Purple | `153, 0, 255` | 3 | Slow pulse |
-| 6 | Hazardous | Maroon | `128, 0, 0` | 3 | Fast pulse |
+Every enabled group has exactly one source. The source kind determines how the group's value is resynchronized after a reboot or reconnect and how staleness is detected.
 
-The level names are defaults, not hard-coded domain vocabulary. A profile may call them `normal`, `notice`, `attention`, `warning`, `severe`, and `critical`, for example.
+| Source kind | Configuration | Resync after reboot or reconnect | Staleness signal | Initialization window |
+|---|---|---|---|---|
+| Local sensor | `sensor:` referencing a sensor attached to this device | Next sensor publish | TTL | Greater of the global initialization timeout and the group's TTL |
+| Home Assistant entity | `sensor:` referencing a `platform: homeassistant` sensor | Automatic: Home Assistant sends current entity state when it connects | Home Assistant disconnection; the entity's own `unavailable`/`unknown` state while connected | Global initialization timeout, restarted at each Home Assistant connection |
+| Action-driven | No `sensor:` | None; the caller must resend | TTL | Global initialization timeout |
 
-For the one-LED `center` group, levels 1 through 6 always illuminate the single pixel. The level is conveyed by color and, for levels 5 and 6, animation.
+The source kind is inferred at configuration validation from the platform of the referenced sensor. There is no separate source key that could contradict the binding.
+
+**Local sensors.** Polling sensors publish on every update interval even when the value is unchanged, so a missing publish is a genuine staleness signal. The default TTL is three times the update interval of the polling component that owns the bound sensor, resolved at configuration validation. If that interval cannot be determined, for example because the sensor publishes only on change, the group must declare an explicit `ttl` or configuration is rejected. A sensor that fails normally publishes `NaN`, which resolves immediately to Unknown/Unavailable. Because the initialization window is at least the TTL, a slow first poll, a smoothing filter, or sensor warm-up does not produce Unknown/Unavailable before a reading could reasonably be expected.
+
+**Home Assistant entities.** Values reach the device through ESPHome's `homeassistant` sensor platform, which subscribes to the entity. Home Assistant sends the entity's current state when the connection is established and on every later state change. Home Assistant publishes only on state change, so a steady valid value may legitimately go unrepeated for hours. These groups therefore have no TTL, and configuring `ttl` on them is rejected. Freshness is tied to the connection:
+
+- "Connected" means an API client with a state subscription is connected. The ESPHome dashboard log viewer and other clients without a state subscription do not count. The component evaluates this condition in its loop and acts on edges rather than registering callbacks.
+- On disconnection, every Home Assistant-sourced group becomes Unknown/Unavailable immediately. A Home Assistant restart therefore shows Unknown/Unavailable briefly; this is accurate and accepted.
+- On connection, every enabled Home Assistant-sourced group enters Initializing with a fresh initialization window. The subscription normally delivers the current value within that window.
+- While connected, the entity's `unavailable` or `unknown` state reaches the device as `NaN` and resolves to Unknown/Unavailable.
+
+At boot, a Home Assistant-sourced group starts Initializing with the global window. If Wi-Fi and the API are not connected before that window expires, the group becomes Unknown/Unavailable and re-enters Initializing when the connection is established.
+
+**Action-driven values.** A group without a sensor binding receives values only through `set_group_value`, from local automations or the native API wrapper. Nothing resends these values after a reboot or reconnect; the caller is responsible for resending. Values that exist as Home Assistant entities, including template sensors and `input_number` helpers, should be bound as Home Assistant entities rather than pushed. Action-driven TTL defaults are selected by type:
+
+| Type | Default TTL |
+|---|---:|
+| `status` | `never` |
+| `co2` | 5 minutes |
+| `voc` | 5 minutes |
+| `aqi` | 30 minutes |
+
+For local-sensor and action-driven groups, a positive per-group `ttl` overrides the default. `never` is allowed only for action-driven `type: status` groups. Expiry occurs when `now - last_valid_at >= ttl` and resolves to Unknown/Unavailable.
+
+## 9. Six-status scale
+
+The fixed version 1 six-status rendering adopts the ordering and simplified RGB values used by Apollo AIR-1. The integers are ordered from lowest to highest severity, but they have no public names. Measurement-specific meaning belongs to the lookup table selected by `type`.
+
+| Status | Color | RGB | Three-LED fill | Effect |
+|---:|---|---|---:|---|
+| 1 | Green | `0, 255, 0` | 1 | Steady |
+| 2 | Yellow | `255, 255, 0` | 2 | Steady |
+| 3 | Orange | `255, 128, 0` | 3 | Steady |
+| 4 | Red | `255, 0, 0` | 3 | Steady |
+| 5 | Purple | `153, 0, 255` | 3 | Slow pulse |
+| 6 | Maroon | `128, 0, 0` | 3 | Fast pulse |
+
+The one-LED `center` group cannot use fill count, so it uses a restrained temporal code in addition to color:
+
+| Center status | Redundant encoding |
+|---:|---|
+| 1 | Steady |
+| 2 | One brief off-notch at the start of each 6-second cycle |
+| 3 | Two brief off-notches at the start of each 6-second cycle |
+| 4 | Three brief off-notches at the start of each 6-second cycle |
+| 5 | Slow pulse |
+| 6 | Fast pulse |
+
+An off-notch is 120 ms, separated by 180 ms at the status color. A status change resets the temporal-code phase and takes effect on the next render frame. These are fixed version 1 timings. Physical validation may motivate a later architecture revision, but they are not user configuration.
 
 ### 9.1 Color limitations
 
@@ -269,75 +317,59 @@ The AIR-1 palette is retained for compatibility, but it is not sufficient as the
 - green is perceptually brighter than red or purple on typical RGB LEDs; and
 - red, green, yellow, orange, and maroon may be difficult to separate for common color-vision deficiencies.
 
-Fill and animation are therefore normative parts of the default rendering profile, not optional decoration.
+Fill, color, and animation are therefore normative parts of the fixed version 1 rendering policy, not optional decoration or configuration.
 
 ## 10. Meta-state rendering
 
-| Meta-state | Three-LED rendering | Center rendering | Default timing |
+| Meta-state | Three-LED rendering | Center rendering | Timing |
 |---|---|---|---|
 | Off | All pixels off | Off | Static |
-| Unknown/Unavailable | All pixels dim white, slow pulse | Dim white, slow pulse | 3-second cycle |
-| Initializing | One blue pixel moves through the group | Blue breathing pulse | 250 ms per chase step; 2-second center pulse |
+| Unknown/Unavailable | All pixels white at 15% base intensity, slow pulse | White at 15% base intensity, slow pulse | 3-second cycle |
+| Initializing | One blue (`0, 0, 255`) pixel moves through the group | Blue (`0, 0, 255`) breathing pulse | 250 ms per chase step; 2-second center pulse |
 
-Meta-state colors and timings are profile settings. Their semantics are fixed.
+Meta-state colors, patterns, and timings are fixed version 1 component policy. They are not exposed as configuration.
 
 Animations must use monotonic time and must not use blocking delays. A new state must take effect on the next render frame.
 
-## 11. Mapping profiles
+## 11. Typed values and lookup tables
 
-A mapping profile converts domain input into a normalized level. Profiles do not contain physical pixels.
+Every group configures exactly one input `type`. A normal update therefore contains only one numeric `value`; the group's configured type determines whether that value is already a status or must be translated through a lookup table.
 
-### 11.1 Label mappings
+| Type | Input | Behavior |
+|---|---|---|
+| `status` | exact integer `1` through `6` | Use the integer directly; do not run a lookup. |
+| `co2` | finite CO2 value in ppm | Translate through the CO2 lookup table. |
+| `aqi` | finite U.S. EPA AQI value | Translate through the AQI lookup table. |
+| `voc` | finite Sensirion VOC Index | Translate through the VOC lookup table. |
 
-Labels are normalized by trimming whitespace and comparing case-insensitively. Profiles may define aliases.
+The public interface does not accept named normal states. Any string supplied as a normal status is invalid. Off, Unknown/Unavailable, and Initializing remain separate resolved meta-states. Off is controlled through enablement, Unknown/Unavailable has an explicit invalidation action, and Initializing is lifecycle-controlled only.
 
-Conceptual example:
+`aqi` accepts an already-computed AQI value, not a raw PM2.5 or other pollutant concentration. `voc` means the Sensirion VOC Index on its 1 through 500 scale, not TVOC in ppb. Supporting another VOC representation requires another explicit type or conversion before calling this component.
 
-```yaml
-# Architecture schema, not literal ESPHome syntax.
-profiles:
-  home_status:
-    labels:
-      okay: 1
-      normal: 1
-      notice: 2
-      attention: 3
-      warning: 4
-      severe: 5
-      critical: 6
-```
+### 11.1 Fixed lookup model
 
-An unrecognized label resolves to Unknown/Unavailable and produces a diagnostic log entry.
+Version 1 ships one fixed lookup table for each measurement type. Lookup tables are compiled component policy, not user configuration. All groups using the same type therefore share the same thresholds. Adding custom or per-group tables later must not change the public action's `group` and `value` fields.
 
-### 11.2 Numeric range mappings
+Inputs are real numbers and bands are evaluated using the explicit continuous predicates below. Every accepted input produces an integer status from 1 through 6. `NaN`, infinity, parse failures, missing values, negative CO2/AQI values, and VOC Index values outside 1 through 500 resolve immediately to Unknown/Unavailable.
 
-Numeric profiles contain ordered, non-overlapping ranges with complete handling for expected input values.
+### 11.2 Built-in lookup tables
 
-```yaml
-# Architecture schema, not literal ESPHome syntax.
-profiles:
-  air_quality_index:
-    ranges:
-      - { max: 50,  level: 1 }
-      - { max: 100, level: 2 }
-      - { max: 150, level: 3 }
-      - { max: 200, level: 4 }
-      - { max: 300, level: 5 }
-      - { above: 300, level: 6 }
-```
+The fixed tables follow the current Apollo AIR-1 indicator behavior.
 
-Range rules:
+| Status | CO2 in ppm | U.S. EPA AQI | Sensirion VOC Index |
+|---:|---|---|---|
+| 1 | `x <= 800` | `0 <= x <= 50` | `1 <= x < 80` |
+| 2 | `800 < x <= 1000` | `50 < x <= 100` | `80 <= x < 150` |
+| 3 | `1000 < x <= 1500` | `100 < x <= 150` | `150 <= x < 250` |
+| 4 | `1500 < x <= 2000` | `150 < x <= 200` | `250 <= x < 400` |
+| 5 | `2000 < x <= 2500` | `200 < x <= 300` | `400 <= x <= 500` |
+| 6 | `x > 2500` | `x > 300` | not used by the fixed table |
 
-- Upper bounds are inclusive unless explicitly configured otherwise.
-- `NaN`, infinity, parse failures, and missing values resolve to Unknown/Unavailable.
-- Ranges must be validated for gaps, overlap, and monotonic level order.
-- A profile may clamp out-of-domain finite values or mark them unavailable; that choice must be explicit.
-- Optional hysteresis should be supported to prevent flicker near thresholds.
-- Optional minimum dwell time should be supported for noisy sources.
+Finite non-negative CO2 values are accepted and values above the final threshold remain status 6. Finite non-negative AQI values are accepted; values above 500 are beyond the formal AQI scale but remain status 6 for display. VOC Index values outside 1 through 500 are invalid. The CO2 table is display policy rather than a universal health scale.
 
-### 11.3 Percentage profile
+### 11.3 Stateless translation
 
-A generic percentage profile may map a continuous value into six equal or configured bands. The numeric value determines the level; the resolved level then determines both fill and color. The renderer does not calculate thresholds.
+Every valid input translates and commits immediately. The first implementation does not implement hysteresis, minimum dwell, or pending candidate states. Noisy sensors should use ESPHome sensor filters on the bound sensor, or smoothing upstream of an action call. Invalid input, TTL expiry, explicit invalidation, disablement, and lifecycle reinitialization also transition immediately, with the result visible on the next render frame.
 
 ## 12. Rendering pipeline
 
@@ -348,47 +380,51 @@ The renderer produces a complete ten-pixel frame on every animated update:
 1. Clear an in-memory ten-pixel frame.
 2. Resolve the current pattern for each group.
 3. Apply the pattern using that group's render order.
-4. Apply global brightness and optional color calibration.
+4. Apply global brightness.
 5. Commit the complete frame to the addressable light.
 
 All four groups are disjoint, so normal group rendering cannot conflict. Future overlays must be composed in this single pipeline rather than writing independently to the LEDs.
 
 ### 12.2 Fill behavior
 
-For a three-LED group, the default active count is:
+For a three-LED group, the fixed active count is:
 
 ```text
-Level 1 -> first pixel in render order
-Level 2 -> first two pixels
-Level 3 -> all three pixels
-Level 4 -> all three pixels
-Level 5 -> all three pixels
-Level 6 -> all three pixels
+Status 1 -> first pixel in render order
+Status 2 -> first two pixels
+Status 3 -> all three pixels
+Status 4 -> all three pixels
+Status 5 -> all three pixels
+Status 6 -> all three pixels
 ```
 
-The fill direction is defined by the group table in Section 5. Fill order may be changed in physical configuration without changing profiles or automations.
+The fill direction and order are fixed by the group table in Section 5 and are not user configuration.
 
 ### 12.3 Animation behavior
 
-Recommended default render cadence:
+Fixed version 1 render cadence and timing:
 
 - Static states: render immediately on change and reuse the frame.
-- Animated states: 20 frames per second maximum.
+- Animated states: render at 20 frames per second.
 - Chase step: 250 ms.
-- Slow pulse: 2 to 3 seconds per cycle.
+- Slow pulse: 3 seconds per cycle.
 - Fast pulse: 500 ms per cycle.
+- Initializing center breathing pulse: 2 seconds per cycle.
+- Center status 1 through 4 temporal-code cycle: 6 seconds, using the notch timings in Section 9.
 
-Animation timing must remain configurable. Effects should remain legible rather than visually aggressive. Rapid strobing is not a default behavior.
+These values are compiled constants, not schema options. Effects remain legible rather than visually aggressive, and version 1 provides no rapid-strobe effect.
+
+Slow pulse, fast pulse, and center breathing use a triangular intensity wave from 25% to 100% of the state's base color. The phase begins at 100% when the state is entered, making a new state visible immediately. The Unknown/Unavailable pulse applies that wave to its 15% white base intensity. Global brightness is applied after these per-state intensity calculations.
 
 ### 12.4 Brightness
 
-Brightness is a global multiplier applied after group pattern composition. The first implementation should expose a 5% to 100% setting and start at 50% until physical daytime/nighttime testing establishes a better default.
+Brightness is a global multiplier applied after group pattern composition. It is the only exposed visual setting. Version 1 accepts 5% through 100% and defaults to 50%.
 
-The renderer should avoid full-brightness white across all ten LEDs by default. Any later current limiting or per-channel calibration belongs at this final rendering stage.
+The renderer avoids full-brightness white across all ten LEDs. Version 1 does not expose per-channel calibration.
 
 ### 12.5 Transitions
 
-Status changes are immediate by default. The raw ESPHome light should retain a zero-second default transition so that interpolation does not obscure state changes or interfere with animation timing.
+Status changes are immediate. The raw ESPHome light retains a zero-second transition so that interpolation does not obscure state changes or interfere with animation timing.
 
 ## 13. Control interfaces
 
@@ -397,96 +433,135 @@ The architecture defines semantic operations. Their exact ESPHome API syntax is 
 ### 13.1 Required operations
 
 ```text
-set_group_level(group_id, level)
-set_group_label(group_id, label, profile_id)
-set_group_value(group_id, numeric_value, profile_id)
-set_group_meta(group_id, off | unknown_unavailable | initializing)
+set_group_value(group_id, numeric_value)
+set_group_unavailable(group_id)
 set_group_enabled(group_id, boolean)
 set_global_brightness(percent)
 ```
 
-Setting a valid level, label, or value clears Initializing and Unknown/Unavailable for that group. Setting a meta-state clears the currently displayed level but may retain the last source value for diagnostics.
+`set_group_value` is the sole normal-state operation for action-driven groups. The group configuration supplies its type. Calling `set_group_value` on a sensor-bound group is rejected with a warning log, because an action value would bypass that group's freshness rules and be silently overwritten by the next sensor publish. `set_group_unavailable` and `set_group_enabled` apply to every group regardless of source. For a group configured as `status`, the action accepts a finite numeric value whose mathematical value is integral and within 1 through 6; `4` and `4.0` are valid, while `4.0001`, strings, and booleans are invalid. Groups configured as `co2`, `aqi`, or `voc` translate the value through the corresponding lookup table.
+
+Action-driven groups accept the same semantic actions from local ESPHome automations and Home Assistant. If multiple producers target one action-driven group, the last call processed on the ESPHome main loop wins. Applications that need priority, timestamps, or arbitration must implement that policy upstream.
+
+Setting a valid value clears Initializing and Unknown/Unavailable for that group. `set_group_unavailable` invalidates the current status and may retain the last source value and type only as explicitly historical diagnostics. No public action sets Initializing. `set_group_enabled(false)` is the sole way to produce Off.
 
 ### 13.2 Home Assistant exposure
 
-The recommended Home Assistant surface is semantic rather than pixel-oriented:
+Home Assistant entity values reach the device by subscription, not by push. A group bound to a `platform: homeassistant` sensor needs no Home Assistant automation and resynchronizes automatically on every connection (Section 8.5). Subscribing to entity state does not require granting the device permission to perform Home Assistant actions.
 
-- one action/service for setting a group label;
-- one action/service for setting a group numeric value and profile;
-- one action/service for setting a meta-state;
+```yaml
+sensor:
+  - platform: homeassistant
+    id: ha_outdoor_aqi
+    entity_id: sensor.outdoor_aqi
+```
+
+The native API actions remain for action-driven groups, typically statuses computed in Home Assistant automations. They do not resynchronize after a reboot or reconnect. A value that already exists as a Home Assistant entity should be bound by subscription instead.
+
+The Home Assistant surface is semantic rather than pixel-oriented:
+
+- one native API action for setting an action-driven group's numeric value;
+- one native API action for setting a group to Unknown/Unavailable;
+- one native API action for enabling or disabling a group;
 - one global brightness number; and
-- one diagnostic text sensor per group showing the resolved state.
+- diagnostic entities described in Section 18.
 
-The raw ten-pixel light and any implementation-only partitions should be marked internal so that direct light calls cannot bypass the renderer.
+The external component registers synchronous ESPHome automation actions. Those component actions do not become Home Assistant actions automatically. The integration package must declare explicit native `api.actions` wrappers that validate their wire fields and forward to the component actions. Local ESPHome automations call the same component actions directly.
+
+The normal-value API wrapper contains exactly two fields: `group` and numeric `value`. It does not carry a type selector; changing a group's interpretation requires changing configuration and restarting the component.
+
+Resolved-state text uses the stable wire strings `off`, `unknown_unavailable`, `initializing`, and `1` through `6`. Before component initialization, diagnostics publish no state rather than inventing a tenth display state.
+
+The raw ten-pixel light and any implementation-only partitions must be marked internal so that direct light calls cannot bypass or stop the renderer.
 
 ### 13.3 Local ESPHome sources
 
-Local sensors may call the same semantic operations without Home Assistant. Loss of the Home Assistant connection must not stop local rendering.
+Sensors attached to the device are bound to a group by ID. The component subscribes to the sensor's state callback; no `on_value` automation is needed. Loss of the Home Assistant connection must not stop local rendering or invalidate local-sensor groups.
+
+```yaml
+sensor:
+  - platform: scd4x
+    update_interval: 60s
+    co2:
+      id: bedroom_co2
+
+casita_status:
+  groups:
+    left:
+      type: co2
+      sensor: bedroom_co2   # default TTL = 3 x 60s
+```
+
+Noise handling belongs in the bound sensor's ESPHome filters. The group receives the filtered value.
 
 ## 14. ESPHome implementation boundary
 
 ### 14.1 Hardware driver
 
-Use one internal `esp32_rmt_led_strip` light with the official hardware parameters:
+The upstream ESK-1 configuration already declares the Casita strip as `rgb_module`. The status-board package must extend that declaration by ID; it must not declare another `esp32_rmt_led_strip` instance or another GPIO 14 driver.
 
 ```yaml
 light:
-  - platform: esp32_rmt_led_strip
-    id: casita_pixels
+  - id: !extend rgb_module
     internal: true
-    pin: GPIO14
-    chipset: WS2812
-    num_leds: 10
-    rgb_order: grb
+    restore_mode: ALWAYS_ON
     default_transition_length: 0s
+    effects:
+      - addressable_lambda:
+          name: Casita Status Renderer
+          update_interval: 50ms
+          lambda: |-
+            id(casita_status).render(it, initial_run);
 ```
 
-This is an illustrative fragment; the final package must merge safely with the upstream ESK-1 configuration and must not declare a competing driver for GPIO 14.
+This fragment illustrates the required merge mechanism. Extending the existing light preserves its official GPIO 14, ten-pixel WS2812, GRB, and `rmt_symbols: 48` configuration. The package does not override `gamma_correct`; the light keeps ESPHome's default gamma of 2.8, matching the upstream ESK-1 and AIR-1 behavior that the fixed palette assumes. The package starts the renderer effect after both the light and component are ready and keeps the underlying light at 100% brightness. The component applies global brightness exactly once while composing the frame.
 
-### 14.2 Renderer
+The package must verify at configuration/compile time where possible, and at runtime otherwise, that the referenced output is addressable and contains exactly ten pixels. A mismatch fails visibly and logs an error rather than writing an unknown buffer.
 
-The recommended implementation is a small renderer with direct access to the addressable frame, invoked by an ESPHome `addressable_lambda` effect or a focused custom component. It should contain:
+### 14.2 External component and renderer
+
+The production implementation is a local ESPHome external component under `components/casita_status/`. Its Python module owns schema validation, ID references, code generation, and synchronous automation-action registration. Its C++ class owns state resolution, fixed lookup translation, TTL timing, animation, diagnostics, and complete-frame rendering.
+
+The minimum supported ESPHome release is 2026.3.0. Automation actions declare `synchronous=True`, and templatable primitive arguments use the current documented code-generation path. CI also compiles against current stable ESPHome so later API changes are caught promptly.
+
+The addressable-lambda fragment above is only a thin, package-owned bridge that supplies ESPHome's existing addressable buffer to the C++ renderer. It does not contain policy or duplicate rendering logic. The renderer contains:
 
 - the fixed group-to-pixel map;
 - group state storage;
-- profile-independent pattern rendering;
+- lookup-independent pattern rendering;
 - non-blocking animation calculations; and
 - complete-frame commit behavior.
 
-Pure YAML scripts may be used for a prototype, but duplicated per-group branching should not become the long-term architecture.
+The raw light is internal, the bridge is the only configured effect, and the component treats an unexpectedly stopped or replaced bridge as a fault: it logs the event and restores the renderer effect on the next component loop. Rendering is a no-op until the light reports ready, preventing early-boot access to an uninitialized output.
 
 ### 14.3 Partitions
 
-ESPHome's `partition` light platform can split and combine addressable segments, including reversed segments. It is useful for diagnostics and early prototypes. It is not the preferred public control interface because independent partition entities can create multiple writers and expose implementation details.
+The production package does not create light partitions. Partitions would introduce additional writers and expose the physical layout. Mapping diagnostics operate through renderer-owned test methods that still compose and commit the complete ten-pixel frame.
 
-If partitions are used internally:
+## 15. Update ordering and state mutation
 
-- `left` uses indices 5 through 7;
-- `right` uses indices 1 through 3 with reversed presentation order;
-- `center` uses index 4; and
-- `top` combines indices 8 through 9 with index 0.
+### 15.1 Single update path
 
-## 15. Ownership and precedence
+Each enabled group has exactly one configured input type and one source. Bound-sensor state callbacks, local component actions, and native API wrappers all converge on one internal submit path that validates, translates, and commits the value. Source kind affects only which producers a group accepts and how freshness is judged, not how a value is translated or rendered.
 
-### 15.1 Group ownership
+All updates are serialized on the ESPHome main loop, and the renderer observes a coherent snapshot. A sensor-bound group accepts values only from its bound sensor. For action-driven groups, the last processed call wins. The component does not arbitrate between producers or track priority.
 
-Each input binding owns one group's source state until it is replaced or cleared. Multiple automations must not race by writing raw pixels.
+### 15.2 Display-state mutation
 
-If multiple semantic sources need the same group, an adapter must arbitrate them before calling the status-board interface. Source arbitration is domain policy and is intentionally outside the renderer.
-
-### 15.2 Display precedence
-
-Within a group, the resolver precedence is:
+There is no precedence stack or collection of state flags. Each group has one `display_state` field, and operations replace it atomically on the ESPHome main loop:
 
 ```text
-Off > Initializing > Unknown/Unavailable > Level1..Level6
+disable                                  ->  0  (Off)
+boot, enable, restart, HA connect        -> -2  (Initializing)
+invalid, expired, absent, HA disconnect  -> -1  (UnknownUnavailable)
+valid translated value                   -> 1..6
 ```
 
-This is resolution precedence, not severity. A valid Level6 does not override an explicitly disabled group.
+Updates received while `display_state == 0` are dropped. This single-field representation makes it impossible for a group to be simultaneously disabled, initializing, invalid, and valid.
 
-### 15.3 Optional escalation
+### 15.3 Status 6 scope
 
-A profile may request that Level6 use a broader visual treatment, such as a full-group fast pulse. Full-board takeover is disabled by default because it would hide the other three groups. If added later, it must be implemented as a renderer overlay with explicit priority and timeout, not as a new meta-state.
+Status 6 remains local to its assigned group. It never produces a full-board overlay or hides another group's state. No status, including status 6, activates the buzzer.
 
 ## 16. Startup and recovery
 
@@ -494,14 +569,32 @@ Recommended boot sequence:
 
 1. Initialize the raw light with all pixels off.
 2. Initialize enabled groups to Initializing.
-3. Start the renderer.
+3. Prevent `deep_sleep_1` for the lifetime of the status-board package.
 4. Start local sensors and Home Assistant/API connectivity.
-5. Resolve each group to a level when its first valid input arrives.
-6. Resolve a group to Unknown/Unavailable if initialization completes without valid data.
+5. Start the renderer bridge after the component and `rgb_module` are ready.
+6. Resolve each group to an integer status when its first valid input arrives.
+7. Resolve a group to Unknown/Unavailable when its initialization window (Section 8.5) expires without valid data.
+8. When Home Assistant connects, restart Initializing for every enabled Home Assistant-sourced group; the subscription delivers current entity state.
 
-Displayed state should not be restored blindly across reboot. Boot must begin in Initializing so that an old good status cannot be mistaken for a current measurement.
+Displayed state is never restored across reboot. Boot begins in Initializing so that an old good status cannot be mistaken for a current measurement.
 
-Configuration such as group enablement, profile selection, brightness, hysteresis, and TTL may be restored when appropriate.
+Configuration such as group enablement, brightness, and TTL overrides may be restored when appropriate. Action-driven values are not restored; their callers must resend them.
+
+The first implementation is an always-awake status board. Its package must extend the upstream `prevent_sleep` switch to make it internal and forced on, and must call `deep_sleep.prevent` during boot. Sleep-enabled operation is out of scope because LEDs, animation, API actions, and TTL evaluation do not run during deep sleep.
+
+```yaml
+# Integration intent; final syntax must validate against the supported ESPHome release.
+switch:
+  - id: !extend prevent_sleep
+    internal: true
+    restore_mode: ALWAYS_ON
+
+esphome:
+  min_version: 2026.3.0
+  on_boot:
+    then:
+      - deep_sleep.prevent: deep_sleep_1
+```
 
 ## 17. Failure handling
 
@@ -509,172 +602,136 @@ Configuration such as group enablement, profile selection, brightness, hysteresi
 |---|---|
 | Missing or invalid source value | Unknown/Unavailable |
 | `NaN` or infinite numeric value | Unknown/Unavailable |
-| Unknown label | Unknown/Unavailable plus warning log |
-| Missing profile | Unknown/Unavailable plus error log |
-| Invalid range profile | Reject configuration at validation time |
-| Home Assistant disconnect | Continue local sources; remote-only sources eventually become Unknown/Unavailable according to TTL |
+| Unknown configured input type | Reject configuration at validation time |
+| Non-integral or out-of-range `status` value | Unknown/Unavailable plus warning log |
+| Attempt to set Initializing through a public action | Reject action at validation or dispatch time |
+| Update received while disabled | Drop update plus diagnostic log; remain Off |
+| `set_group_value` on a sensor-bound group | Reject action plus warning log; state unchanged |
+| Bound sensor ID missing or not a numeric sensor | Reject configuration at validation time |
+| `ttl` configured on a Home Assistant-sourced group | Reject configuration at validation time |
+| Local-sensor TTL cannot be derived and no `ttl` given | Reject configuration at validation time |
+| Initialization deadline exceeded | Unknown/Unavailable |
+| Home Assistant disconnect | Home Assistant-sourced groups become Unknown/Unavailable immediately; local-sensor groups are unaffected; action-driven groups follow their TTL |
+| Home Assistant reconnect | Home Assistant-sourced groups re-enter Initializing and resynchronize from the subscription |
+| Home Assistant entity `unavailable` or `unknown` | Unknown/Unavailable |
 | Renderer restart | Rebuild all ten pixels from current group states |
+| Renderer effect stopped or replaced | Log fault and restore it on the next component loop |
+| Addressable output is not ten pixels | Refuse rendering and log an error |
 | Group disabled | Off |
 
 One group's failure must not erase or reset another group's display.
 
 ## 18. Observability
 
-The implementation should expose enough diagnostics to understand a display without decoding the LEDs:
+The implementation exposes a minimal diagnostic set for each group, marked `entity_category: diagnostic` and disabled by default except for resolved state:
 
-- resolved state for each group;
-- active profile for each group;
-- most recent source label or numeric value;
-- time since the last valid update;
+- resolved meta-state or integer status for each group;
+- configured input type;
+- source kind and bound sensor ID;
+- Home Assistant state-subscription connection status;
+- most recent numeric source value;
+- time since the last valid update and TTL remaining;
+- invalid/rejected update counter;
 - global brightness;
 - renderer frame/update counter; and
-- warnings for invalid labels, ranges, profiles, or group IDs.
+- warnings for invalid types, values, or group IDs.
 
-State-change logs should identify the group, previous state, new state, and source. Animation frames should not be logged.
+The required Home Assistant surface is the resolved-state text sensor. Other diagnostics may be entities or log-only values in the first implementation, but all must appear in `dump_config()` or diagnostic logs. Retained type/value metadata is labeled historical whenever the resolved state is Off, Initializing, or Unknown/Unavailable.
+
+State-change logs identify the group, previous state, new state, input type, source kind, and reason. Animation frames are not logged.
 
 ## 19. Configuration schema
 
 The following illustrates the desired configuration model. It is architectural pseudocode, not a promise of exact ESPHome YAML syntax.
 
 ```yaml
-casita_status_board:
+casita_status:
+  id: casita_status
+  light_id: rgb_module
   brightness: 50%
-  render_interval: 50ms
+  initialization_timeout: 30s
 
   groups:
     left:
-      pixels: [5, 6, 7]
-      fill_order: [5, 6, 7]
+      type: co2
+      sensor: bedroom_co2      # local sensor: TTL = 3 x update interval
     right:
-      pixels: [1, 2, 3]
-      fill_order: [3, 2, 1]
+      type: aqi
+      sensor: ha_outdoor_aqi   # platform: homeassistant; connection-based freshness
     center:
-      pixels: [4]
-      fill_order: [4]
+      type: voc
+      sensor: bedroom_voc
+      ttl: 10min               # explicit override
     top:
-      pixels: [8, 9, 0]
-      fill_order: [8, 9, 0]
-
-  meta_states:
-    off:
-      effect: off
-    unknown_unavailable:
-      color: [255, 255, 255]
-      brightness: 15%
-      effect: slow_pulse
-    initializing:
-      color: [0, 0, 255]
-      effect: chase
-
-  levels:
-    1: { color: [0, 255, 0],   fill: 1, effect: steady }
-    2: { color: [255, 255, 0], fill: 2, effect: steady }
-    3: { color: [255, 128, 0], fill: 3, effect: steady }
-    4: { color: [255, 0, 0],   fill: 3, effect: steady }
-    5: { color: [153, 0, 255], fill: 3, effect: slow_pulse }
-    6: { color: [128, 0, 0],   fill: 3, effect: fast_pulse }
+      type: status             # action-driven; no sensor
 ```
 
-The physical map should ship as a built-in Casita layout. It may be represented in configuration for testing, but normal users should not need to specify it.
+The physical map, colors, fills, effects, animation timings, and 50 ms animated render interval ship as built-in Casita policy and are not user configuration. `brightness` is the only visual option.
+
+Every enabled group declares exactly one type and at most one `sensor`. The source kind is inferred from the bound sensor's platform (Section 8.5). The global `initialization_timeout` defaults to 30 seconds. `ttl` is optional for local-sensor and action-driven groups and is rejected on Home Assistant-sourced groups; when omitted, it uses the defaults in Section 8.5.
 
 ## 20. Testing strategy
 
-### 20.1 Mapping tests
+The C++ core is unit-tested on the host with an injected clock. Only these tests are required:
 
-- Verify every physical LED lights individually in chain order 0 through 9.
-- Verify the physical-position table against the real module.
-- Verify every pixel belongs to exactly one group.
-- Verify all ten pixels are covered.
-- Verify the `top` group correctly wraps from index 9 to index 0.
-- Verify left and right fill upward from the base.
-
-### 20.2 State-resolution tests
-
-For every group, verify:
-
-- disabled resolves to Off;
-- initializing resolves to Initializing;
-- invalid input resolves to Unknown/Unavailable;
-- each valid level resolves to Level1 through Level6;
-- a new valid value exits Initializing and Unknown/Unavailable; and
-- TTL expiry resolves to Unknown/Unavailable.
-
-### 20.3 Profile tests
-
-- Test every exact threshold boundary.
-- Test values immediately below and above boundaries.
-- Test negative, extremely large, `NaN`, and infinite values.
-- Test aliases and unknown labels.
-- Test hysteresis in both directions.
-- Reject gaps, overlaps, invalid levels, and unsorted range definitions.
-
-### 20.4 Renderer tests
-
-- Compare complete ten-pixel frames for all nine states on all four groups.
-- Verify group isolation when another group changes.
-- Verify animations are non-blocking and deterministic for a supplied timestamp.
-- Verify brightness scales colors without changing resolved states.
-- Verify an immediate state change interrupts the previous animation.
-
-### 20.5 Physical visual validation
-
-Test the actual Casita module:
-
-- in daylight and darkness;
-- at 5%, 25%, 50%, and 100% brightness;
-- through the intended stand/diffuser;
-- from typical viewing distance and angle;
-- with each adjacent level pair; and
-- with users who have common color-vision deficiencies when possible.
-
-Particular attention should be paid to yellow versus orange and red versus maroon. If they are not reliably distinguishable, adjust brightness, animation, or the calibrated RGB values without changing level semantics.
+1. **Mapping:** all ten pixels belong to exactly one group, fill order matches Section 5, and `top` wraps from index 9 to 0.
+2. **Lookups:** every threshold in Section 11.2 lands in the correct band, and `NaN`, infinity, and out-of-range values resolve to Unknown/Unavailable.
+3. **State:** boot, disable/re-enable, initialization timeout, TTL expiry (including counter rollover), and `status` validation (`4.0` accepted, `4.0001` rejected) produce the states in Section 8.
+4. **Sources:** Home Assistant disconnect invalidates only Home Assistant-sourced groups, reconnect re-enters Initializing and resyncs, and `set_group_value` on a sensor-bound group is rejected.
+5. **Renderer:** golden ten-pixel frames for each state on one three-LED group and on `center`, and a change to one group leaves the others' pixels unchanged.
+6. **Build:** the example compiles for ESP32-C6 on the minimum and current ESPHome releases, with one GPIO 14 driver, `rgb_module` internal, and deep sleep prevented.
+7. **Physical:** view each adjacent status pair on the real module through the diffuser, day and night, at minimum and default brightness. Revise the compiled palette if yellow/orange or red/maroon cannot be told apart.
 
 ## 21. Acceptance criteria
 
 The first implementation is complete when:
 
 1. The four group mappings match the physical Casita layout.
-2. Automations can set labels, numeric values, and the three meta-states without knowing pixel indices.
-3. Valid values resolve deterministically to one of six levels.
+2. Automations can set a direct integer status, a typed CO2/AQI/VOC value, Unknown/Unavailable, or enabled/Off without knowing pixel indices; Initializing remains lifecycle-only.
+3. Every valid typed value resolves deterministically to an integer status from 1 through 6.
 4. Off, Unknown/Unavailable, and Initializing are visually distinct.
-5. Levels remain distinguishable through redundant fill and animation cues.
+5. Statuses remain distinguishable through fill or temporal animation in addition to color, including on the center group.
 6. A change to one group does not alter another group.
 7. The top group's chain wrap is invisible to callers.
 8. No component other than the renderer writes the raw ten-pixel frame.
 9. Boot never displays a restored measurement as current before validation.
 10. Invalid inputs fail visibly as Unknown/Unavailable and are logged.
 11. The system continues rendering local sources without Home Assistant.
-12. Physical daytime/nighttime and diffuser testing has been completed.
+12. Home Assistant-sourced groups show current entity values after a device reboot, a Home Assistant restart, or a reconnect, without any Home Assistant automation.
+13. Physical daytime/nighttime and diffuser testing has been completed.
+14. The compiled configuration contains exactly one GPIO 14 driver, keeps `rgb_module` internal, and remains continuously awake.
+15. Global brightness is the only exposed visual setting; the version 1 palette, fills, effects, and timings cannot be overridden through configuration.
 
 ## 22. Proposed repository structure
 
 ```text
-esk_casita_status/
+esphome-casita-status/
   ARCHITECTURE.md
+  components/
+    casita_status/
+      __init__.py
+      casita_status.h
+      casita_status.cpp
   packages/
-    casita_status_board.yaml
-  include/
-    casita_status_board.h
+    casita_status.yaml
   examples/
-    basic_status_board.yaml
+    esk1_basic_status_board.yaml
   tests/
     mapping/
-    profiles/
+    lookups/
+    state/
     renderer/
+    integration/
   references/
     ESPHome-Starter-Kit/
 ```
 
-The architecture does not require a C++ helper on day one, but the public semantic interface and tests should remain stable if a YAML prototype is later replaced by a custom component.
+The Python/C++ external component is the production implementation from day one. YAML remains a thin integration layer for extending `rgb_module`, declaring local and `homeassistant` sensors for groups to bind, bridging native API actions, preventing deep sleep, and selecting configuration values.
 
 ## 23. Decisions remaining before implementation
 
 - Assign initial real-world domains to `left`, `right`, `center`, and `top`.
-- Select the first label and numeric mapping profiles.
-- Decide source-specific TTL and hysteresis values.
-- Validate default RGB values and brightness on physical hardware.
-- Decide whether Level6 remains group-local or may optionally request a full-board overlay.
-- Decide whether a later version should coordinate the onboard buzzer with Level6.
+- Validate the fixed RGB values, animation timings, and default brightness on physical hardware.
 
 These are configuration and product-behavior decisions. They do not change the physical grouping or semantic architecture defined here.
 
@@ -684,6 +741,10 @@ These are configuration and product-behavior decisions. They do not change the p
 - [Apollo AIR-1 firmware](https://github.com/ApolloAutomation/AIR-1/blob/main/Integrations/ESPHome/Core.yaml)
 - [Apollo AIR-1 LED indicator documentation](https://wiki.apolloautomation.com/products/air1/additional-info/led-indicator/)
 - [U.S. EPA/AirNow AQI basics](https://www.airnow.gov/aqi/aqi-basics/)
+- [ESPHome external components](https://esphome.io/components/external_components/)
+- [ESPHome component automation actions](https://developers.esphome.io/architecture/components/automations/)
+- [ESPHome deep sleep](https://esphome.io/components/deep_sleep/)
+- [ESPHome Home Assistant sensor](https://esphome.io/components/sensor/homeassistant/)
+- [ESPHome native API](https://esphome.io/components/api/)
 - [ESPHome Light Partition](https://esphome.io/components/light/partition/)
 - [ESPHome addressable light effects](https://esphome.io/components/light/)
-
