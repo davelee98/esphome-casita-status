@@ -1,0 +1,11 @@
+# Device checks
+
+Hardware execution has not been completed. Run these checks on an ESK-1 with the Casita module, using firmware built with both ESPHome 2026.3.0 and the current supported version.
+
+1. Compile and install `tests/integration/esk1_device_checks.yaml` with your normal ESPHome tooling. Add Wi-Fi/API settings if using network logs, and adjust component/include paths if copying the YAML into Device Builder's config directory.
+2. Capture logs from boot. After roughly six seconds, `casita_device_test` must report `PASS`: maroon and Unknown/Unavailable have nonzero minimum raw channel values at 25% brightness, disabled top pixels stay zero, and center status 2 has both a zero notch and a lit interval. The observer reads actual driver-buffer bytes and never writes pixels.
+3. Check the displayed patterns at 25% and 50% brightness. Cycle all groups through statuses 1–6, Unknown/Unavailable, disabled, and re-enabled/Initializing using the native API wrappers. Compare adjacent statuses, especially red/maroon and center statuses 1–4. Confirm readable pulse troughs, group independence, and the top fill order.
+4. Install the normal example with real Home Assistant entities. Restart Home Assistant while each entity is unchanged; readings must recover without an automation. Disable a bound group, change its entity, and re-enable it; it must display the current subscribed value. Disconnect Home Assistant; bound groups become Unknown/Unavailable while local/action groups follow their own rules. A second subscribed client can keep the connection marker active.
+5. Change global brightness, allow the normal preferences write interval to pass, and reboot. Confirm restoration; enabled groups must initialize without displaying a saved measurement. Stop the raw renderer through a test-only local light call and confirm it recovers with existing group states. Check the board remains awake beyond the upstream 90-second run duration and after an API client connects.
+
+Record firmware version, raw-byte test result, brightness, and any unreadable pair. The 25% floor and visual policy remain provisional until these checks pass; revise the architecture before changing them.
