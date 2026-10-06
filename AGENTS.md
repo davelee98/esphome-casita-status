@@ -59,20 +59,25 @@ Build this as a local ESPHome external component with a thin YAML integration la
 
 - Put schema validation and ESPHome code generation in the component's Python module.
 - Put state resolution, typed lookup translation, animation, and full-frame rendering in non-blocking C++.
-- Target ESPHome 2026.3.0 or newer and register component automation actions as synchronous.
+- Target ESPHome 2026.3.0 or newer, enforce the minimum in component Python validation, and register component automation actions as synchronous.
 - Reference the existing ESK-1 addressable-light instance instead of declaring another GPIO 14 driver.
 - Extend the existing `rgb_module` declaration by ID, mark it internal, preserve `rmt_symbols: 48`, and use only the package-owned renderer bridge effect.
+- Have the component start the renderer effect when the light is ready and restore it if stopped; renderer recovery redraws existing group states.
+- Keep the raw light off during setup with `restore_mode: ALWAYS_OFF`; the component turns it on with the renderer to avoid a full-white startup frame.
 - Keep the raw ten-pixel light internal.
 - Maintain one rendering owner for the complete pixel frame.
 - Configure exactly one input type per group. Expose a single-value numeric action: `status` accepts integers 1 through 6, while `co2`, `aqi`, and `voc` use their fixed built-in lookup table. Keep explicit unavailable and enablement controls separate.
 - Give each group exactly one source: a local sensor, a Home Assistant entity bound through a `platform: homeassistant` sensor, or action-driven values. Infer the source kind from the bound sensor's platform. See ARCHITECTURE.md Section 8.5.
 - Receive Home Assistant entity values by subscription, not push, so they resynchronize on every connection without Home Assistant automations.
+- Clear Home Assistant replay eligibility at boot and each detected disconnect. Record subsequent sensor publications even before connection detection or while disabled; on connect or re-enable, enter Initializing and replay an eligible value through the normal submit path. Keep disabled groups Off and do not display a replay candidate as current while disconnected.
+- Append native API wrappers under `api.services` to merge with ESK-1's existing buzzer service. Do not configure both `api.services` and `api.actions`.
 - Use the fixed built-in CO2, AQI, and VOC lookup tables in version 1; do not expose lookup overrides.
 - Keep the version 1 palette, fill rules, effects, animation timings, and render cadence fixed in the component. Expose global brightness as the only visual setting.
+- Apply brightness and pulse multipliers in output intensity, then encode for ESPHome gamma as defined in ARCHITECTURE.md Section 12.4. Use a provisional brightness range of 25–100%, default 50%; persist global brightness and clamp restored values to that range, falling back to configured brightness when no valid saved value exists.
 - Route all sources through one internal submit path. Reject `set_group_value` on sensor-bound groups; for action-driven groups, the last call processed on the main loop wins.
-- Judge freshness by source kind. Local sensors use a TTL of 3 × the sensor's update interval, and their initialization window is the greater of 30 s and that TTL. Home Assistant sources have no TTL: they go `UnknownUnavailable` when Home Assistant disconnects and re-enter `Initializing` when it connects. Action-driven TTLs default to `never` for status, 5 minutes for CO2 and VOC, and 30 minutes for AQI. Permit a positive per-group TTL override except on Home Assistant sources.
+- Judge freshness by source kind. Derive local-sensor TTL as 3 × the polling interval only for known platforms and filters that publish every update; otherwise require an explicit TTL. Their initialization window is the greater of the global initialization timeout (default 30 s) and that TTL. Enabled Home Assistant sources have no TTL: they go `UnknownUnavailable` when Home Assistant disconnects and re-enter `Initializing` when it connects. Action-driven TTLs default to `never` for status, 5 minutes for CO2 and VOC, and 30 minutes for AQI. Permit a positive per-group TTL override except on Home Assistant sources.
 - Count only API clients with a state subscription as a Home Assistant connection; the dashboard log viewer does not count.
-- Keep the status-board package continuously awake.
+- Keep the status-board package continuously awake: force the internal `prevent_sleep` switch on to avoid ESK-1's manual sleep branch, and have the component call `prevent_deep_sleep()` during setup to block automatic sleep. The component's `deep_sleep_id` is optional; the ESK-1 package supplies `deep_sleep_1`.
 
 A large collection of YAML globals, scripts, and duplicated lambdas is acceptable only for a short-lived prototype, not the production implementation.
 
@@ -89,6 +94,7 @@ A large collection of YAML globals, scripts, and duplicated lambdas is acceptabl
 - Preserve the official `rmt_symbols: 48` setting and never create a second GPIO 14 light.
 - Do not override `gamma_correct`; keep ESPHome's default gamma (2.8), which the AIR-1 palette assumes.
 - Treat Off as enablement state only; disabling invalidates current data, and re-enabling starts in `Initializing`.
+- Default configured group enablement to true and reapply it on each device boot. Do not persist runtime enablement changes; repeated enable/disable calls matching the current state are no-ops.
 - Treat Initializing as lifecycle-only; no public action may set it.
 - Keep status 6 group-local. No status may create a full-board overlay or activate the buzzer.
 - Do not add configuration for colors, fills, effects, animation timings, render cadence, or per-channel calibration in version 1.
@@ -121,7 +127,7 @@ Create these directories as implementation work requires them; do not add empty 
 
 ## Validation expectations
 
-For implementation changes, keep the minimal test set in ARCHITECTURE.md Section 20 passing: host unit tests for mapping, lookups, state, sources, and renderer, plus an ESP32-C6 compile. Do the physical check before declaring the palette final.
+For implementation changes, keep the minimal test set in ARCHITECTURE.md Section 20 passing: host unit tests for mapping, lookups, state, sources, and renderer; Python validation tests in `tests/integration/`; and a merged ESK-1 ESP32-C6 compile on minimum and current ESPHome releases. Host renderer tests cover encoded frames; check the actual gamma-corrected driver output on-device. Complete physical validation before declaring the visual policy, including the provisional 25% brightness floor, final.
 
 ## Reference material
 

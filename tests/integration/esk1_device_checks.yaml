@@ -1,0 +1,93 @@
+# Test-only observer: the component remains the sole pixel writer.
+substitutions:
+  casita_components_path: ../../components
+packages:
+  esk1: !include ../../references/ESPHome-Starter-Kit/Integrations/ESPHome/ESK-1.yaml
+  status_board: !include ../../packages/casita_status.yaml
+
+esphome:
+  name: casita-device-checks
+  on_boot:
+    - priority: -100
+      then:
+        - delay: 2s
+        - casita_status.set_global_brightness:
+            id: casita_board
+            value: 25
+        - casita_status.set_group_value:
+            id: casita_board
+            group: left
+            value: 6
+        - casita_status.set_group_unavailable:
+            id: casita_board
+            group: right
+        - delay: 100ms  # Allow the first complete maroon/unknown frame to render.
+        - casita_status.set_group_value:
+            id: casita_board
+            group: center
+            value: 2
+        - lambda: id(checking_output) = true;
+        - delay: 4s
+        - lambda: |-
+            id(checking_output) = false;
+            const bool passed = id(maroon_min) > 0 && id(unknown_min) > 0 &&
+                                id(dark_pixels_ok) && id(saw_notch) && id(saw_center_on);
+            ESP_LOGI("casita_device_test", "%s: maroon_min=%d unknown_min=%d dark=%s notch=%s center_on=%s",
+                     passed ? "PASS" : "FAIL", id(maroon_min), id(unknown_min),
+                     YESNO(id(dark_pixels_ok)), YESNO(id(saw_notch)), YESNO(id(saw_center_on)));
+
+casita_status:
+  brightness: 25%
+  groups:
+    left:
+      type: status
+    right:
+      type: status
+    center:
+      type: status
+    top:
+      type: status
+      enabled: false
+
+globals:
+  - id: checking_output
+    type: bool
+    initial_value: 'false'
+  - id: maroon_min
+    type: int
+    initial_value: '255'
+  - id: unknown_min
+    type: int
+    initial_value: '255'
+  - id: dark_pixels_ok
+    type: bool
+    initial_value: 'true'
+  - id: saw_notch
+    type: bool
+    initial_value: 'false'
+  - id: saw_center_on
+    type: bool
+    initial_value: 'false'
+
+interval:
+  - interval: 50ms
+    then:
+      - lambda: |-
+          if (!id(checking_output)) return;
+          auto *output = static_cast<esphome::light::AddressableLight *>(id(rgb_module).get_output());
+          // Inspect raw bytes after assignment through ESPHome's actual color correction.
+          for (int pixel : {5, 6, 7})
+            id(maroon_min) = std::min(id(maroon_min), int((*output)[pixel].get_red_raw()));
+          for (int pixel : {3, 2, 1}) {
+            const auto view = (*output)[pixel];
+            id(unknown_min) = std::min(id(unknown_min), int(view.get_red_raw()));
+            id(unknown_min) = std::min(id(unknown_min), int(view.get_green_raw()));
+            id(unknown_min) = std::min(id(unknown_min), int(view.get_blue_raw()));
+          }
+          for (int pixel : {8, 9, 0}) {
+            const auto view = (*output)[pixel];
+            id(dark_pixels_ok) &= view.get_red_raw() == 0 && view.get_green_raw() == 0 && view.get_blue_raw() == 0;
+          }
+          const auto center = (*output)[4];
+          id(saw_notch) |= center.get_red_raw() == 0 && center.get_green_raw() == 0 && center.get_blue_raw() == 0;
+          id(saw_center_on) |= center.get_red_raw() > 0 && center.get_green_raw() > 0;

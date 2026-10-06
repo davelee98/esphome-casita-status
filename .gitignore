@@ -1,1 +1,7 @@
 *.code-workspace
+/.venv*/
+/.build/
+**/.esphome/
+__pycache__/
+.pytest_cache/
+**/secrets.yaml

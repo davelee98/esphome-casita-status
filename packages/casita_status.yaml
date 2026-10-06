@@ -1,0 +1,60 @@
+# Include after the official ESK-1 package. The caller supplies casita_status.groups.
+substitutions:
+  casita_components_path: ../components
+
+external_components:
+  - source:
+      type: local
+      path: ${casita_components_path}
+    components: [casita_status]
+
+casita_status:
+  id: casita_board
+  light_id: rgb_module
+  deep_sleep_id: deep_sleep_1
+
+light:
+  - id: !extend rgb_module
+    internal: true
+    restore_mode: ALWAYS_OFF
+    default_transition_length: 0s
+    effects:
+      - addressable_lambda:
+          name: Casita Status Renderer
+          update_interval: 50ms
+          lambda: |-
+            id(casita_board).render(it, initial_run);
+
+switch:
+  - id: !extend prevent_sleep
+    internal: true
+    restore_mode: ALWAYS_ON
+
+api:
+  # Match the spelling in ESK-1 so its play_buzzer service remains present.
+  services:
+    - service: casita_set_group_value
+      variables:
+        group: string
+        value: float
+      then:
+        - casita_status.set_group_value:
+            id: casita_board
+            group: !lambda return std::string(group);
+            value: !lambda return value;
+    - service: casita_set_group_unavailable
+      variables:
+        group: string
+      then:
+        - casita_status.set_group_unavailable:
+            id: casita_board
+            group: !lambda return std::string(group);
+    - service: casita_set_group_enabled
+      variables:
+        group: string
+        enabled: bool
+      then:
+        - casita_status.set_group_enabled:
+            id: casita_board
+            group: !lambda return std::string(group);
+            enabled: !lambda return enabled;
