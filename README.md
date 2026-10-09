@@ -5,7 +5,7 @@ An ESPHome external component that turns the ESPHome Starter Kit (ESK-1) Casita 
 ## Requirements
 
 - ESPHome 2026.3.0 or newer. The component refuses to validate on older releases.
-- An ESK-1 with the Casita LED and buzzer module, configured from the official ESK-1 YAML. This repository vendors it under `references/`.
+- An ESK-1 with the Casita LED and buzzer module, configured from the [official ESK-1 YAML](https://github.com/ApolloAutomation/ESPHome-Starter-Kit/blob/main/Integrations/ESPHome/ESK-1.yaml). Device YAMLs include it directly from Apollo's repository as an ESPHome remote package; ESPHome downloads it at build time.
 - A local clone of this repository. The package loads the component from disk.
 
 ## Adding the status board to a device YAML
@@ -29,7 +29,7 @@ substitutions:
   casita_components_path: esphome-casita-status/components
 
 packages:
-  esk1: !include esphome-casita-status/references/ESPHome-Starter-Kit/Integrations/ESPHome/ESK-1.yaml
+  esk1: github://ApolloAutomation/ESPHome-Starter-Kit/Integrations/ESPHome/ESK-1.yaml@41dd7d47efa14a7ba9bf56fd4c58f7d14eb18c2f
   status_board: !include esphome-casita-status/packages/casita_status.yaml
 
 esphome:
@@ -64,7 +64,7 @@ casita_status:
       type: status
 ```
 
-All three paths are relative to the device YAML. `casita_components_path` must point at this repository's `components` directory. The package's default (`../components`) only works for files in `examples/`. Keep `secrets.yaml` beside the device YAML. [examples/esk1_basic_status_board.yaml](examples/esk1_basic_status_board.yaml) is a complete example that binds three Home Assistant sensors.
+The `esk1` package is pinned to an upstream commit so builds are reproducible; change the hash after `@` to adopt a newer ESK-1 release. The other two paths are relative to the device YAML. `casita_components_path` must point at this repository's `components` directory. The package's default (`../components`) only works for files in `examples/`. Keep `secrets.yaml` beside the device YAML. [examples/esk1_basic_status_board.yaml](examples/esk1_basic_status_board.yaml) is a complete example that binds three Home Assistant sensors.
 
 Do not declare another light on GPIO 14, add effects to `rgb_module`, or control `rgb_module` directly. Validation rejects a modified light, and the component is the only thing that writes its pixels.
 
@@ -229,3 +229,11 @@ python3 -m venv .venv-linux
 Repeat validation and compilation with the current stable release. CI tests both the minimum and current versions. Host tests exercise the standalone C++ core; Python tests validate real merged configurations and expected failures. Host frame tests do not run ESPHome's gamma or LED driver.
 
 For hardware checks, compile [the device-check configuration](tests/integration/esk1_device_checks.yaml). It logs a PASS/FAIL result for gamma-corrected pulse troughs, disabled pixels, and center off-notches. See [the physical check instructions](tests/integration/DEVICE_CHECKS.md). Compilation is verified; hardware execution and physical readability checks are still pending.
+
+## License
+
+Copyright (C) 2026 David Lee
+
+This project is licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE).
+
+The ESK-1 configuration, schematics, and models are © Apollo Automation, licensed under [CC BY-NC-SA 4.0](https://github.com/ApolloAutomation/ESPHome-Starter-Kit/blob/main/LICENSE.md), and are not included in this repository. Device configurations download the ESK-1 YAML from [ApolloAutomation/ESPHome-Starter-Kit](https://github.com/ApolloAutomation/ESPHome-Starter-Kit) at build time.

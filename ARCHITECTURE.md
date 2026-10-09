@@ -46,12 +46,14 @@ The architecture is intended to be:
 
 The official ESK-1 configuration defines the Casita RGB module as a ten-pixel WS2812 strip on GPIO 14 using GRB channel order. The underlying light has zero transition time.
 
-Relevant local references:
+Upstream references, maintained by Apollo Automation under CC BY-NC-SA 4.0 and not copied into this repository:
 
-- [Official ESK-1 ESPHome configuration](references/ESPHome-Starter-Kit/Integrations/ESPHome/ESK-1.yaml)
-- [LED and buzzer module schematic](references/ESPHome-Starter-Kit/hardware/electronics/Modules/LED_And_Buzzer_Module.pdf)
-- [LED and buzzer module STEP model](references/ESPHome-Starter-Kit/hardware/cad/pcb-placeholders/LED%20and%20Buzzer%20Module.step)
-- [Upstream ESK-1 README](references/ESPHome-Starter-Kit/README.md)
+- [Official ESK-1 ESPHome configuration](https://github.com/ApolloAutomation/ESPHome-Starter-Kit/blob/main/Integrations/ESPHome/ESK-1.yaml)
+- [LED and buzzer module schematic](https://github.com/ApolloAutomation/ESPHome-Starter-Kit/blob/main/hardware/electronics/Modules/LED_And_Buzzer_Module.pdf)
+- [LED and buzzer module STEP model](https://github.com/ApolloAutomation/ESPHome-Starter-Kit/blob/main/hardware/cad/pcb-placeholders/LED%20and%20Buzzer%20Module.step)
+- [Upstream ESK-1 README](https://github.com/ApolloAutomation/ESPHome-Starter-Kit/blob/main/README.md)
+
+Device configurations include the ESK-1 YAML as an ESPHome remote package pinned to an upstream commit.
 
 ## 4. Physical LED topology
 
@@ -491,7 +493,7 @@ The Home Assistant surface is semantic rather than pixel-oriented:
 - one global brightness number; and
 - diagnostic entities described in Section 18.
 
-The external component registers synchronous ESPHome automation actions. Those component actions do not become Home Assistant actions automatically. The integration package must declare explicit native API wrappers that validate their wire fields and forward to the component actions. For the vendored ESK-1 integration, append wrappers under `api.services`, the supported legacy spelling already used by its buzzer service. Do not add a simultaneous `api.actions` key: the supported API schema makes the two keys mutually exclusive. Preserve the upstream service while merging the wrappers. Local ESPHome automations call the same component actions directly.
+The external component registers synchronous ESPHome automation actions. Those component actions do not become Home Assistant actions automatically. The integration package must declare explicit native API wrappers that validate their wire fields and forward to the component actions. For the upstream ESK-1 integration, append wrappers under `api.services`, the supported legacy spelling already used by its buzzer service. Do not add a simultaneous `api.actions` key: the supported API schema makes the two keys mutually exclusive. Preserve the upstream service while merging the wrappers. Local ESPHome automations call the same component actions directly.
 
 The normal-value API wrapper contains exactly two fields: `group` and numeric `value`. It does not carry a type selector; changing a group's interpretation requires changing configuration and rebooting the device.
 
@@ -615,7 +617,7 @@ switch:
     restore_mode: ALWAYS_ON
 ```
 
-The component accepts an optional `deep_sleep_id`. The ESK-1 package supplies `deep_sleep_1`, and component code generation binds it for the setup call. Configurations without deep sleep omit the ID and skip that call; the component does not require or create a deep-sleep instance. No additional `on_boot` mapping is needed for this protection, so the upstream boot automation remains intact. Any other added boot automation must use list form compatible with the upstream list. The example's final main configuration declares `esphome.min_version: 2026.3.0` for clarity; component validation remains authoritative. Validate the fully merged configuration, with ESK-1 included before the status-board package, rather than validating either fragment in isolation. Vendored ESK-1 files remain unchanged.
+The component accepts an optional `deep_sleep_id`. The ESK-1 package supplies `deep_sleep_1`, and component code generation binds it for the setup call. Configurations without deep sleep omit the ID and skip that call; the component does not require or create a deep-sleep instance. No additional `on_boot` mapping is needed for this protection, so the upstream boot automation remains intact. Any other added boot automation must use list form compatible with the upstream list. The example's final main configuration declares `esphome.min_version: 2026.3.0` for clarity; component validation remains authoritative. Validate the fully merged configuration, with ESK-1 included before the status-board package, rather than validating either fragment in isolation. The upstream ESK-1 YAML is included as a pinned remote package and is never modified.
 
 ## 17. Failure handling
 
@@ -749,8 +751,7 @@ esphome-casita-status/
     state/
     renderer/
     integration/
-  references/
-    ESPHome-Starter-Kit/
+  LICENSE
 ```
 
 The Python/C++ external component is the production implementation from day one. YAML remains a thin integration layer for extending `rgb_module`, declaring local and `homeassistant` sensors for groups to bind, bridging native API actions, preventing deep sleep, and selecting configuration values.
