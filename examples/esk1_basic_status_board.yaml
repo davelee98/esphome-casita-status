@@ -1,6 +1,6 @@
 # Replace these HA entity IDs with your measurements. Top is action-driven.
 packages:
-  esk1: !include ../references/ESPHome-Starter-Kit/Integrations/ESPHome/ESK-1.yaml
+  esk1: github://ApolloAutomation/ESPHome-Starter-Kit/Integrations/ESPHome/ESK-1.yaml@41dd7d47efa14a7ba9bf56fd4c58f7d14eb18c2f
   status_board: !include ../packages/casita_status.yaml
 
 esphome:

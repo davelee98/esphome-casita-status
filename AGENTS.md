@@ -98,8 +98,7 @@ A large collection of YAML globals, scripts, and duplicated lambdas is acceptabl
 - Treat Initializing as lifecycle-only; no public action may set it.
 - Keep status 6 group-local. No status may create a full-board overlay or activate the buzzer.
 - Do not add configuration for colors, fills, effects, animation timings, render cadence, or per-channel calibration in version 1.
-- Treat everything under `references/ESPHome-Starter-Kit/` as vendored read-only source material.
-- Do not edit or regenerate the copied PDF or STEP references.
+- Do not vendor Apollo ESK-1 files into this repository; they are licensed CC BY-NC-SA 4.0. Include the official ESK-1 YAML as an ESPHome remote package pinned to an upstream commit.
 
 ## Expected repository structure
 
@@ -121,8 +120,6 @@ tests/
   state/
   renderer/
   integration/
-references/
-  ESPHome-Starter-Kit/
 ```
 
 Create these directories as implementation work requires them; do not add empty placeholder directories.
@@ -134,8 +131,8 @@ For implementation changes, keep the minimal test set in ARCHITECTURE.md Section
 ## Reference material
 
 - [Architecture specification](ARCHITECTURE.md)
-- [Official ESK-1 YAML](references/ESPHome-Starter-Kit/Integrations/ESPHome/ESK-1.yaml)
-- [Casita LED and buzzer schematic](references/ESPHome-Starter-Kit/hardware/electronics/Modules/LED_And_Buzzer_Module.pdf)
-- [Casita STEP model](references/ESPHome-Starter-Kit/hardware/cad/pcb-placeholders/LED%20and%20Buzzer%20Module.step)
+- [Official ESK-1 YAML](https://github.com/ApolloAutomation/ESPHome-Starter-Kit/blob/main/Integrations/ESPHome/ESK-1.yaml)
+- [Casita LED and buzzer schematic](https://github.com/ApolloAutomation/ESPHome-Starter-Kit/blob/main/hardware/electronics/Modules/LED_And_Buzzer_Module.pdf)
+- [Casita STEP model](https://github.com/ApolloAutomation/ESPHome-Starter-Kit/blob/main/hardware/cad/pcb-placeholders/LED%20and%20Buzzer%20Module.step)
 - [Apollo AIR-1 firmware](https://github.com/ApolloAutomation/AIR-1/blob/main/Integrations/ESPHome/Core.yaml)
 - [ESPHome external components documentation](https://esphome.io/components/external_components/)

@@ -79,7 +79,7 @@ def fixture_config(tmp_path, edits="", use_package=True):
     text = f"""substitutions:
   casita_components_path: {ROOT.as_posix()}/components
 packages:
-  esk1: !include {ROOT.as_posix()}/references/ESPHome-Starter-Kit/Integrations/ESPHome/ESK-1.yaml
+  esk1: github://ApolloAutomation/ESPHome-Starter-Kit/Integrations/ESPHome/ESK-1.yaml@41dd7d47efa14a7ba9bf56fd4c58f7d14eb18c2f
 """
     if use_package:
         text += f"  board: !include {ROOT.as_posix()}/packages/casita_status.yaml\n"
