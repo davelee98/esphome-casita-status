@@ -1,7 +1,7 @@
 # Casita Status Board Architecture
 
 Status: Proposed  
-Version: 0.11
+Version: 0.12
 Last updated: 2026-10-09
 
 ## 1. Purpose
@@ -27,7 +27,7 @@ The architecture is intended to be:
 - Four fixed logical LED groups.
 - Six ordered integer statuses derived from the AIR-1/EPA AQI scale.
 - Three meta-states: Off, Unknown/Unavailable, and Initializing.
-- Direct integer statuses and CO2-, AQI-, and VOC-to-status lookup tables.
+- Direct integer statuses and CO2-, AQI-, PM2.5-, VOC-, and NOx-to-status lookup tables.
 - Group sources: sensors attached to the device, Home Assistant entities, and action-driven values.
 - Fill, color, brightness, and animation rendering.
 - ESPHome and Home Assistant integration boundaries.
@@ -174,7 +174,7 @@ The measurement lookup tables, palette, fill rules, effects, and animation timin
 The system separates policy from mechanism:
 
 - Source bindings and actions know how to receive data and how its freshness is judged (Section 8.5).
-- Input translators know how `status`, `co2`, `aqi`, and `voc` values become integers from 1 through 6.
+- Input translators know how `status`, `co2`, `aqi`, `pm25`, `voc`, and `nox` values become integers from 1 through 6.
 - The state resolver decides the current display state.
 - The renderer knows how states appear on a particular group geometry.
 - The hardware driver knows how to transmit pixels.
@@ -287,7 +287,9 @@ At boot, a Home Assistant-sourced group starts Initializing with the global wind
 |---|---:|
 | `status` | `never` |
 | `co2` | 5 minutes |
+| `pm25` | 5 minutes |
 | `voc` | 5 minutes |
+| `nox` | 5 minutes |
 | `aqi` | 30 minutes |
 
 For local-sensor and action-driven groups, a positive per-group `ttl` overrides the default. `never` is allowed only for action-driven `type: status` groups. Expiry occurs when `now - last_valid_at >= ttl` and resolves to Unknown/Unavailable.
@@ -352,21 +354,23 @@ Every group configures exactly one input `type`. A normal update therefore conta
 | `status` | exact integer `1` through `6` | Use the integer directly; do not run a lookup. |
 | `co2` | finite CO2 value in ppm | Translate through the CO2 lookup table. |
 | `aqi` | finite U.S. EPA AQI value | Translate through the AQI lookup table. |
+| `pm25` | finite PM2.5 concentration in µg/m³ | Translate through the PM2.5 lookup table. |
 | `voc` | finite Sensirion VOC Index | Translate through the VOC lookup table. |
+| `nox` | finite Sensirion NOx Index | Translate through the NOx lookup table. |
 
 The public interface does not accept named normal states. Any string supplied as a normal status is invalid. Off, Unknown/Unavailable, and Initializing remain separate resolved meta-states. Off is controlled through enablement, Unknown/Unavailable has an explicit invalidation action, and Initializing is lifecycle-controlled only.
 
-`aqi` accepts an already-computed AQI value, not a raw PM2.5 or other pollutant concentration. `voc` means the Sensirion VOC Index on its 1 through 500 scale, not TVOC in ppb. Supporting another VOC representation requires another explicit type or conversion before calling this component.
+`aqi` accepts an already-computed AQI value, not a raw pollutant concentration. `pm25` accepts a raw PM2.5 concentration in µg/m³ and maps it directly to the AQI category bands, so no AQI number is computed. `voc` and `nox` mean the Sensirion VOC and NOx Indexes on their 1 through 500 scales, not TVOC in ppb or NOx concentrations. Supporting another VOC or NOx representation requires another explicit type or conversion before calling this component.
 
 ### 11.1 Fixed lookup model
 
 Version 1 ships one fixed lookup table for each measurement type. Lookup tables are compiled component policy, not user configuration. All groups using the same type therefore share the same thresholds. Adding custom or per-group tables later must not change the public action's `group` and `value` fields.
 
-Inputs are real numbers and bands are evaluated using the explicit continuous predicates below. Every accepted input produces an integer status from 1 through 6. `NaN`, infinity, parse failures, missing values, negative CO2/AQI values, and VOC Index values outside 1 through 500 resolve immediately to Unknown/Unavailable.
+Inputs are real numbers and bands are evaluated using the explicit continuous predicates below. Every accepted input produces an integer status from 1 through 6. `NaN`, infinity, parse failures, missing values, negative CO2/AQI/PM2.5 values, and VOC or NOx Index values outside 1 through 500 resolve immediately to Unknown/Unavailable.
 
 ### 11.2 Built-in lookup tables
 
-The fixed tables follow the current Apollo AIR-1 indicator behavior.
+The CO2, AQI, and VOC tables follow the current Apollo AIR-1 indicator behavior. The PM2.5 table uses the U.S. EPA 2024 PM2.5 breakpoints, which fall on the same category boundaries as the AQI table. The NOx table is project policy: AIR-1 has no NOx indicator, and the Sensirion NOx Index rests at 1 in clean air, so its bands sit much lower than the VOC bands.
 
 | Status | CO2 in ppm | U.S. EPA AQI | Sensirion VOC Index |
 |---:|---|---|---|
@@ -377,7 +381,16 @@ The fixed tables follow the current Apollo AIR-1 indicator behavior.
 | 5 | `2000 < x <= 2500` | `200 < x <= 300` | `400 <= x <= 500` |
 | 6 | `x > 2500` | `x > 300` | not used by the fixed table |
 
-Finite non-negative CO2 values are accepted and values above the final threshold remain status 6. Finite non-negative AQI values are accepted; values above 500 are beyond the formal AQI scale but remain status 6 for display. VOC Index values outside 1 through 500 are invalid. The CO2 table is display policy rather than a universal health scale.
+| Status | PM2.5 in µg/m³ (after truncation) | Sensirion NOx Index |
+|---:|---|---|
+| 1 | `0 <= x <= 9.0` | `1 <= x < 20` |
+| 2 | `9.0 < x <= 35.4` | `20 <= x < 50` |
+| 3 | `35.4 < x <= 55.4` | `50 <= x < 100` |
+| 4 | `55.4 < x <= 125.4` | `100 <= x < 250` |
+| 5 | `125.4 < x <= 225.4` | `250 <= x <= 500` |
+| 6 | `x > 225.4` | not used by the fixed table |
+
+Finite non-negative CO2 values are accepted and values above the final threshold remain status 6. Finite non-negative AQI values are accepted; values above 500 are beyond the formal AQI scale but remain status 6 for display. Following EPA practice, PM2.5 values are truncated to 0.1 µg/m³ before banding, so 9.05 is status 1; finite non-negative values are accepted and values above 225.4 remain status 6. VOC and NOx Index values outside 1 through 500 are invalid. The CO2 table is display policy rather than a universal health scale.
 
 ### 11.3 Stateless translation
 
@@ -466,7 +479,7 @@ set_global_brightness(percent)
 
 Local ESPHome automations also expose `casita_status.suspend` and `casita_status.resume`, accepting either a component ID directly or an `id:` mapping. These synchronous actions hand over output ownership; they are not Home Assistant services, group operations, or display states. Put them first in the other component's start and finish automations, before any delay or deferred work.
 
-`set_group_value` is the sole normal-state operation for action-driven groups. The group configuration supplies its type. Calling `set_group_value` on a sensor-bound group is rejected with a warning log, because an action value would bypass that group's freshness rules and be silently overwritten by the next sensor publish. `set_group_unavailable` and `set_group_enabled` apply to every group regardless of source. For a group configured as `status`, the action accepts a finite numeric value whose mathematical value is integral and within 1 through 6; `4` and `4.0` are valid, while `4.0001`, strings, and booleans are invalid. Groups configured as `co2`, `aqi`, or `voc` translate the value through the corresponding lookup table.
+`set_group_value` is the sole normal-state operation for action-driven groups. The group configuration supplies its type. Calling `set_group_value` on a sensor-bound group is rejected with a warning log, because an action value would bypass that group's freshness rules and be silently overwritten by the next sensor publish. `set_group_unavailable` and `set_group_enabled` apply to every group regardless of source. For a group configured as `status`, the action accepts a finite numeric value whose mathematical value is integral and within 1 through 6; `4` and `4.0` are valid, while `4.0001`, strings, and booleans are invalid. Groups configured as `co2`, `aqi`, `pm25`, `voc`, or `nox` translate the value through the corresponding lookup table.
 
 Action-driven groups accept the same semantic actions from local ESPHome automations and Home Assistant. If multiple producers target one action-driven group, the last call processed on the ESPHome main loop wins. Applications that need priority, timestamps, or arbitration must implement that policy upstream.
 
@@ -720,7 +733,7 @@ The C++ core is unit-tested on the host with an injected clock. Python validatio
 The first implementation is complete when:
 
 1. The four group mappings match the physical Casita layout.
-2. Automations can set a direct integer status, a typed CO2/AQI/VOC value, Unknown/Unavailable, or enabled/Off without knowing pixel indices; Initializing remains lifecycle-only.
+2. Automations can set a direct integer status, a typed CO2/AQI/PM2.5/VOC/NOx value, Unknown/Unavailable, or enabled/Off without knowing pixel indices; Initializing remains lifecycle-only.
 3. Every valid typed value resolves deterministically to an integer status from 1 through 6.
 4. Off, Unknown/Unavailable, and Initializing are visually distinct.
 5. Statuses remain distinguishable through fill or temporal animation in addition to color, including on the center group.

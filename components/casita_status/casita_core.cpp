@@ -15,7 +15,7 @@ const char *state_name(int8_t state) {
   return state >= INITIALIZING && state <= 6 ? NAMES[state + 2] : "unknown_unavailable";
 }
 const char *type_name(InputType type) {
-  static constexpr const char *NAMES[]{"status", "co2", "aqi", "voc"};
+  static constexpr const char *NAMES[]{"status", "co2", "aqi", "voc", "pm25", "nox"};
   return NAMES[static_cast<uint8_t>(type)];
 }
 const char *source_name(SourceKind source) {
@@ -29,17 +29,20 @@ int8_t translate(InputType type, double value) {
   if (!std::isfinite(value)) return UNKNOWN;
   if (type == InputType::STATUS)
     return value >= 1 && value <= 6 && std::floor(value) == value ? static_cast<int8_t>(value) : UNKNOWN;
-  if (type == InputType::VOC) {
+  if (type == InputType::VOC || type == InputType::NOX) {
     if (value < 1 || value > 500) return UNKNOWN;
-    if (value < 80) return 1;
-    if (value < 150) return 2;
-    if (value < 250) return 3;
-    if (value < 400) return 4;
+    static constexpr std::array<double, 4> VOC{{80, 150, 250, 400}}, NOX{{20, 50, 100, 250}};
+    const auto &limits = type == InputType::VOC ? VOC : NOX;
+    for (uint8_t i = 0; i < limits.size(); ++i)
+      if (value < limits[i]) return i + 1;
     return 5;
   }
   if (value < 0) return UNKNOWN;
-  static constexpr std::array<double, 5> CO2{{800, 1000, 1500, 2000, 2500}}, AQI{{50, 100, 150, 200, 300}};
-  const auto &limits = type == InputType::CO2 ? CO2 : AQI;
+  // EPA truncates PM2.5 to 0.1 ug/m3 before applying its 2024 breakpoints.
+  if (type == InputType::PM25) value = std::floor(value * 10 + 1e-6) / 10;
+  static constexpr std::array<double, 5> CO2{{800, 1000, 1500, 2000, 2500}}, AQI{{50, 100, 150, 200, 300}},
+      PM25{{9.0, 35.4, 55.4, 125.4, 225.4}};
+  const auto &limits = type == InputType::CO2 ? CO2 : type == InputType::AQI ? AQI : PM25;
   for (uint8_t i = 0; i < limits.size(); ++i)
     if (value <= limits[i]) return i + 1;
   return 6;

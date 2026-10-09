@@ -6,7 +6,7 @@
 
 namespace esphome::casita_status {
 
-enum class InputType : uint8_t { STATUS, CO2, AQI, VOC };
+enum class InputType : uint8_t { STATUS, CO2, AQI, VOC, PM25, NOX };
 enum class SourceKind : uint8_t { ACTION, LOCAL, HOME_ASSISTANT };
 enum class SubmitResult : uint8_t { ACCEPTED, INVALID, DISABLED, WRONG_SOURCE, PENDING_CONNECTION };
 constexpr int8_t OFF = 0, UNKNOWN = -1, INITIALIZING = -2;
