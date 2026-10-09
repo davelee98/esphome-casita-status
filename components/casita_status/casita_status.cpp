@@ -84,6 +84,7 @@ void CasitaStatus::loop() {
 }
 void CasitaStatus::render(light::AddressableLight &output, bool initial_run) {
   if (!initialized_ || is_failed() || !light_->is_ready()) return;
+  if (suspended_) return;
   if (output.size() != 10) {
     ESP_LOGE(TAG, "Refusing to render a buffer with %ld pixels", static_cast<long>(output.size()));
     mark_failed();
@@ -96,6 +97,12 @@ void CasitaStatus::render(light::AddressableLight &output, bool initial_run) {
   output.schedule_show();
   ++frames_;
   frame_valid_ = true;
+}
+void CasitaStatus::set_suspended(bool suspended) {
+  if (suspended_ == suspended) return;
+  suspended_ = suspended;
+  ESP_LOGI(TAG, "Renderer %s", suspended ? "suspended" : "resumed");
+  if (!suspended) frame_valid_ = false;
 }
 int CasitaStatus::resolve_group_(const std::string &name) {
   const int index = group_index(name.c_str());

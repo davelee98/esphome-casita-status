@@ -65,7 +65,7 @@ Build this as a local ESPHome external component with a thin YAML integration la
 - Have the component start the renderer effect when the light is ready and restore it if stopped; renderer recovery redraws existing group states.
 - Keep the raw light off during setup with `restore_mode: ALWAYS_OFF`; the component turns it on with the renderer to avoid a full-white startup frame.
 - Keep the raw ten-pixel light internal.
-- Maintain one rendering owner for the complete pixel frame.
+- Maintain one writer for the complete pixel frame at a time. Casita owns the buffer except while explicitly suspended; one other on-device component may then write the buffer and schedule output without changing light state, effect, or brightness.
 - Configure exactly one input type per group. Expose a single-value numeric action: `status` accepts integers 1 through 6, while `co2`, `aqi`, and `voc` use their fixed built-in lookup table. Keep explicit unavailable and enablement controls separate.
 - Give each group exactly one source: a local sensor, a Home Assistant entity bound through a `platform: homeassistant` sensor, or action-driven values. Infer the source kind from the bound sensor's platform. See ARCHITECTURE.md Section 8.5.
 - Receive Home Assistant entity values by subscription, not push, so they resynchronize on every connection without Home Assistant automations.
@@ -84,7 +84,7 @@ A large collection of YAML globals, scripts, and duplicated lambdas is acceptabl
 ## Guardrails
 
 - Do not expose raw pixel numbers as the normal user interface.
-- Do not let multiple effects, partitions, or automations write to the raw light concurrently.
+- Do not let multiple components write to the raw light concurrently. Automations, partitions, and additional effects must not write pixels; shared ownership uses local suspend/resume actions while the renderer bridge stays running.
 - Do not assume logical groups are contiguous numeric ranges.
 - Do not restore an old measurement as current after boot; begin enabled groups in `Initializing`.
 - Map missing, invalid, `NaN`, infinite, expired, or unrecognized source data to `UnknownUnavailable`.
