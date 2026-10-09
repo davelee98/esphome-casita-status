@@ -63,7 +63,7 @@ class CasitaStatus final : public Component {
   std::array<int8_t, 4> reported_states_{{10, 10, 10, 10}};
   ESPPreferenceObject brightness_preference_;
   float configured_brightness_{0.5f};
-  uint32_t preference_key_{0}, frames_{0}, last_diagnostic_{0};
+  uint32_t preference_key_{0}, frames_{0};
   bool initialized_{false}, renderer_started_{false}, frame_valid_{false};
 };
 

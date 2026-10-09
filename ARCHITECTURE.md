@@ -737,6 +737,8 @@ esphome-casita-status/
       __init__.py
       casita_status.h
       casita_status.cpp
+      casita_core.h
+      casita_core.cpp
   packages/
     casita_status.yaml
   examples/
