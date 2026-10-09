@@ -1,8 +1,8 @@
 # Casita Status Board Architecture
 
 Status: Proposed  
-Version: 0.10
-Last updated: 2026-10-05
+Version: 0.11
+Last updated: 2026-10-09
 
 ## 1. Purpose
 
@@ -124,7 +124,7 @@ set_unavailable(group="top")
 
 ### 6.2 One rendering owner
 
-Exactly one renderer owns the ten-pixel output buffer. Home Assistant automations, ESPHome sensors, effects, and scripts must not write directly to the raw addressable light.
+Exactly one writer owns the ten-pixel output buffer at a time. The Casita renderer owns it except while explicitly suspended. While suspended, Casita writes nothing and one other on-device component may write the addressable buffer and schedule its output, without changing the light state, effect, or brightness. Home Assistant automations, ESPHome sensors, scripts, partitions, and additional effects must not write directly to the raw addressable light.
 
 This prevents:
 
@@ -462,6 +462,8 @@ set_group_enabled(group_id, boolean)
 set_global_brightness(percent)
 ```
 
+Local ESPHome automations also expose `casita_status.suspend` and `casita_status.resume`, accepting either a component ID directly or an `id:` mapping. These synchronous actions hand over output ownership; they are not Home Assistant services, group operations, or display states. Put them first in the other component's start and finish automations, before any delay or deferred work.
+
 `set_group_value` is the sole normal-state operation for action-driven groups. The group configuration supplies its type. Calling `set_group_value` on a sensor-bound group is rejected with a warning log, because an action value would bypass that group's freshness rules and be silently overwritten by the next sensor publish. `set_group_unavailable` and `set_group_enabled` apply to every group regardless of source. For a group configured as `status`, the action accepts a finite numeric value whose mathematical value is integral and within 1 through 6; `4` and `4.0` are valid, while `4.0001`, strings, and booleans are invalid. Groups configured as `co2`, `aqi`, or `voc` translate the value through the corresponding lookup table.
 
 Action-driven groups accept the same semantic actions from local ESPHome automations and Home Assistant. If multiple producers target one action-driven group, the last call processed on the ESPHome main loop wins. Applications that need priority, timestamps, or arbitration must implement that policy upstream.
@@ -559,6 +561,8 @@ The addressable-lambda fragment above is only a thin, package-owned bridge that 
 
 The raw light is internal, the bridge is the only configured effect, and the component treats an unexpectedly stopped or replaced bridge as a fault: it logs the event and restores the renderer effect on the next component loop. Rendering is a no-op until the light reports ready, preventing early-boot access to an uninitialized output.
 
+Suspension leaves the bridge effect and renderer recovery check running. The renderer returns before consuming dirty state or writing pixels; sensor updates, deadlines, connection handling, diagnostics, and brightness changes continue normally. Resume invalidates the cached frame so the next render redraws all current group states, including unchanged steady states. Repeated suspend or resume calls are no-ops. The other component must suspend before its first buffer write and resume after its last, with no idle writes. It supplies its own pixel levels because Casita brightness affects only Casita frames; the underlying light remains at 100%.
+
 ### 14.3 Partitions
 
 The production package does not create light partitions. Partitions would introduce additional writers and expose the physical layout. Mapping diagnostics operate through renderer-owned test methods that still compose and commit the complete ten-pixel frame.
@@ -589,6 +593,8 @@ Updates received while `display_state == 0` are dropped from group state. The bo
 Status 6 remains local to its assigned group. It never produces a full-board overlay or hides another group's state. No status, including status 6, activates the buzzer.
 
 ## 16. Startup and recovery
+
+Suspension is not persisted: every boot starts unsuspended. There is no automatic timeout; the caller must resume after handing back the buffer. Resume forces a full redraw without resetting group states.
 
 Recommended boot sequence:
 
@@ -704,8 +710,8 @@ The C++ core is unit-tested on the host with an injected clock. Python validatio
 4. **Sources:** Home Assistant disconnect invalidates only enabled Home Assistant-sourced groups; reconnect and re-enable recover an unchanged entity's current value; and `set_group_value` on a sensor-bound group is rejected. Test a sensor publication before connection detection: it does not display as current while disconnected, but connect enters Initializing and immediately replays it. Replay accepts values published since boot or the last detected disconnect, including while disabled, and rejects older retained values. A healthy filtered local sensor with a suitable explicit TTL does not falsely expire.
 5. **Renderer:** host tests compare golden ten-pixel frames for each state on one three-LED group and on `center`, and verify that a change to one group leaves the others' pixels unchanged. Renderer recovery redraws the existing states. Host tests verify the component's encoded frame; the actual ESPHome gamma/output check runs on-device in item 8.
 6. **Validation:** Python or expected configuration-failure tests enforce the minimum ESPHome version independently of package `min_version`, reject invalid bindings, and require an explicit TTL when local sensor publication cannot be safely inferred. Test a known nested polling output, a publication-suppressing filter, and a configuration without a deep-sleep binding.
-7. **Integration/build:** the fully merged ESK-1 example compiles for ESP32-C6 on the minimum and current ESPHome releases, with one GPIO 14 driver, `rgb_module` internal, one renderer bridge that the component starts, and both sleep protections applied. Verify that the upstream boot automation and buzzer service remain present, and that native API wrappers use one compatible services/actions key.
-8. **Device output and physical:** on-device checks with the minimum and current ESPHome test firmware inspect the driver buffer after normal pixel assignment and gamma correction. At minimum brightness, active pulse troughs for maroon and Unknown/Unavailable remain nonzero, while Off and explicit off-notches remain zero. View each adjacent status pair and the meta-states on the module at minimum and default brightness. Confirm readable pulse troughs and that Unknown/Unavailable is distinct from Off. Validate the provisional 25% brightness floor; revise compiled visual policy through an architecture update if readability is unacceptable.
+7. **Integration/build:** the fully merged ESK-1 example compiles for ESP32-C6 on the minimum and current ESPHome releases, with one GPIO 14 driver, `rgb_module` internal, one renderer bridge that the component starts, and both sleep protections applied. Verify that the upstream boot automation and buzzer service remain present, and that native API wrappers use one compatible services/actions key. The existing device-check configuration exercises suspend and resume in short and long forms after its output observer finishes; existing validation and builds cover their schema and code generation.
+8. **Device output and physical:** on-device checks with the minimum and current ESPHome test firmware inspect the driver buffer after normal pixel assignment and gamma correction. At minimum brightness, active pulse troughs for maroon and Unknown/Unavailable remain nonzero, while Off and explicit off-notches remain zero. View each adjacent status pair and the meta-states on the module at minimum and default brightness. Confirm readable pulse troughs and that Unknown/Unavailable is distinct from Off. Validate the provisional 25% brightness floor; revise compiled visual policy through an architecture update if readability is unacceptable. On a combined device, render unchanged steady status-1 inputs, run Fortune, and confirm an undisturbed animation followed promptly by the same steady statuses. Check for a white flash or unexpected renderer-recovery warnings.
 
 ## 21. Acceptance criteria
 
@@ -718,7 +724,7 @@ The first implementation is complete when:
 5. Statuses remain distinguishable through fill or temporal animation in addition to color, including on the center group.
 6. A change to one group does not alter another group.
 7. The top group's chain wrap is invisible to callers.
-8. No component other than the renderer writes the raw ten-pixel frame.
+8. Exactly one component writes the raw ten-pixel frame at a time. Another on-device component may write only while Casita is explicitly suspended, without changing light state, effect, or brightness.
 9. Boot never displays a restored measurement as current before validation.
 10. Invalid inputs fail visibly as Unknown/Unavailable and are logged.
 11. The system continues rendering local sources without Home Assistant.

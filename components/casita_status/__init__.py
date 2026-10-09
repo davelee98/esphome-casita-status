@@ -22,6 +22,7 @@ SetGroupValueAction = ns.class_("SetGroupValueAction", automation.Action)
 SetGroupUnavailableAction = ns.class_("SetGroupUnavailableAction", automation.Action)
 SetGroupEnabledAction = ns.class_("SetGroupEnabledAction", automation.Action)
 SetBrightnessAction = ns.class_("SetBrightnessAction", automation.Action)
+SetSuspendedAction = ns.class_("SetSuspendedAction", automation.Action)
 
 
 def positive_duration(value):
@@ -192,6 +193,17 @@ def group_name(value):
 
 
 ACTION_BASE = {cv.Required(CONF_ID): cv.use_id(CasitaStatus), cv.Required("group"): cv.templatable(group_name)}
+SUSPEND_SCHEMA = automation.maybe_simple_id({cv.Required(CONF_ID): cv.use_id(CasitaStatus)})
+
+
+@automation.register_action("casita_status.suspend", SetSuspendedAction, SUSPEND_SCHEMA, synchronous=True)
+async def suspend_to_code(config, action_id, template_arg, args):
+    return cg.new_Pvariable(action_id, template_arg, await cg.get_variable(config[CONF_ID]), True)
+
+
+@automation.register_action("casita_status.resume", SetSuspendedAction, SUSPEND_SCHEMA, synchronous=True)
+async def resume_to_code(config, action_id, template_arg, args):
+    return cg.new_Pvariable(action_id, template_arg, await cg.get_variable(config[CONF_ID]), False)
 
 
 async def action_code(config, action_id, template_arg, args, fields):

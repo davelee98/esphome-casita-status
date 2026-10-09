@@ -35,6 +35,9 @@ esphome:
             ESP_LOGI("casita_device_test", "%s: maroon_min=%d unknown_min=%d dark=%s notch=%s center_on=%s",
                      passed ? "PASS" : "FAIL", id(maroon_min), id(unknown_min),
                      YESNO(id(dark_pixels_ok)), YESNO(id(saw_notch)), YESNO(id(saw_center_on)));
+        - casita_status.suspend: casita_board
+        - casita_status.resume:
+            id: casita_board
 
 casita_status:
   brightness: 25%

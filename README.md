@@ -66,7 +66,7 @@ casita_status:
 
 All three paths are relative to the device YAML. `casita_components_path` must point at this repository's `components` directory. The package's default (`../components`) only works for files in `examples/`. Keep `secrets.yaml` beside the device YAML. [examples/esk1_basic_status_board.yaml](examples/esk1_basic_status_board.yaml) is a complete example that binds three Home Assistant sensors.
 
-Do not declare another light on GPIO 14, add effects to `rgb_module`, or control `rgb_module` directly. Validation rejects a modified light, and the component is the only thing that writes its pixels.
+Do not declare another light on GPIO 14, add effects to `rgb_module`, or control `rgb_module` directly. Validation rejects a modified light. Casita owns its pixels except during an explicit handover to another on-device component (see [Sharing the light](#sharing-the-light)).
 
 ## Groups
 
@@ -182,6 +182,30 @@ data:
 ```
 
 Brightness is the `Casita Brightness` number entity, not an action. Its value is saved and restored after a reboot.
+
+## Sharing the light
+
+Use the synchronous local actions `casita_status.suspend` and `casita_status.resume` to let another on-device component temporarily draw on the same light. Both accept a component ID directly or an `id:` mapping. They are not exposed as Home Assistant services.
+
+For Fortune's shared-light mode, connect its triggers in the device YAML:
+
+```yaml
+fortune_button:
+  share_light: true
+  on_start:
+    - casita_status.suspend: casita_board
+  on_finish:
+    - casita_status.resume:
+        id: casita_board
+```
+
+The other component must follow these rules:
+
+1. Write only the addressable buffer and call `schedule_show()`. Do not turn the light on or off, change its effect, or change its brightness. Stopping the renderer effect can produce a full-white frame.
+2. Suspend before the first pixel write and resume after the last. Put these direct actions first in the respective trigger automations, before delays or deferred work. Do not write pixels while idle.
+3. Supply its own pixel levels. Casita brightness affects only Casita frames; the underlying light stays at 100%.
+
+The renderer effect and recovery check keep running while suspended. Group values, deadlines, diagnostics, and brightness continue updating. Resume redraws the complete current frame on the next render, even when steady statuses have not changed. Repeated calls are no-ops. Suspension has no automatic timeout and is not persisted; every reboot starts unsuspended.
 
 ## What the LEDs show
 
