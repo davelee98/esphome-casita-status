@@ -30,7 +30,8 @@ def test_minimum_version(monkeypatch):
 
 
 def test_action_defaults_and_overrides():
-    for kind, expected in {"status": 0, "co2": 300000, "voc": 300000, "aqi": 1800000}.items():
+    for kind, expected in {"status": 0, "co2": 300000, "voc": 300000, "pm25": 300000, "nox": 300000,
+                           "aqi": 1800000}.items():
         assert component.resolve_source({CONF_TYPE: kind}, None, None, 30000) == ("ACTION", expected, 30000)
     assert component.resolve_source({CONF_TYPE: "status", "ttl": "never"}, None, None, 30000)[1] == 0
     with pytest.raises(cv.Invalid, match="only on action-driven status"):
@@ -48,6 +49,8 @@ def test_polling_parent_and_filter_policy():
     owner = {"platform": "scd4x", "update_interval": component.positive_duration("60s")}
     group = {CONF_TYPE: "co2"}
     assert component.resolve_source(group, owner, {}, 30000) == ("LOCAL", 180000, 180000)
+    sen6x = {"platform": "sen6x", "update_interval": component.positive_duration("60s")}
+    assert component.resolve_source({CONF_TYPE: "pm25"}, sen6x, {}, 30000) == ("LOCAL", 180000, 180000)
     suppressed = {"filters": [{"delta": 10}]}
     with pytest.raises(cv.Invalid, match="specify ttl"):
         component.resolve_source(group, owner, suppressed, 30000)
@@ -156,6 +159,22 @@ def test_nested_polling_output(tmp_path):
     result = run_config(path)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "_ttl_ms: 180000" in result.stdout
+
+
+def test_sen6x_pm25_and_nox(tmp_path):
+    path = fixture_config(tmp_path, """sensor:
+  - platform: sen6x
+    update_interval: 60s
+    pm_2_5:
+      id: room_pm25
+    nox_index:
+      id: room_nox
+""")
+    text = path.read_text().replace("left:\n      type: status", "left:\n      type: pm25\n      sensor: room_pm25")
+    path.write_text(text.replace("right:\n      type: status", "right:\n      type: nox\n      sensor: room_nox"))
+    result = run_config(path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.count("_ttl_ms: 180000") == 2
 
 
 def test_no_deep_sleep_binding(tmp_path):

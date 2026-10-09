@@ -2,7 +2,7 @@
 
 ## Project summary
 
-This repository develops an ESPHome status-board implementation for the ESPHome Starter Kit Casita LED and buzzer module. The Casita board has ten individually addressable WS2812 RGB LEDs arranged around a house-shaped perimeter. The project accepts direct integer statuses or typed CO2, AQI, and VOC measurements and converts them into stable, readable LED patterns without exposing physical pixel indices to automations.
+This repository develops an ESPHome status-board implementation for the ESPHome Starter Kit Casita LED and buzzer module. The Casita board has ten individually addressable WS2812 RGB LEDs arranged around a house-shaped perimeter. The project accepts direct integer statuses or typed CO2, AQI, PM2.5, VOC, and NOx measurements and converts them into stable, readable LED patterns without exposing physical pixel indices to automations.
 
 The primary specification is [ARCHITECTURE.md](ARCHITECTURE.md). Read it before changing the component interface, LED grouping, state model, palette, or renderer behavior.
 
@@ -66,16 +66,16 @@ Build this as a local ESPHome external component with a thin YAML integration la
 - Keep the raw light off during setup with `restore_mode: ALWAYS_OFF`; the component turns it on with the renderer to avoid a full-white startup frame.
 - Keep the raw ten-pixel light internal.
 - Maintain one writer for the complete pixel frame at a time. Casita owns the buffer except while explicitly suspended; one other on-device component may then write the buffer and schedule output without changing light state, effect, or brightness.
-- Configure exactly one input type per group. Expose a single-value numeric action: `status` accepts integers 1 through 6, while `co2`, `aqi`, and `voc` use their fixed built-in lookup table. Keep explicit unavailable and enablement controls separate.
+- Configure exactly one input type per group. Expose a single-value numeric action: `status` accepts integers 1 through 6, while `co2`, `aqi`, `pm25`, `voc`, and `nox` use their fixed built-in lookup table. Keep explicit unavailable and enablement controls separate.
 - Give each group exactly one source: a local sensor, a Home Assistant entity bound through a `platform: homeassistant` sensor, or action-driven values. Infer the source kind from the bound sensor's platform. See ARCHITECTURE.md Section 8.5.
 - Receive Home Assistant entity values by subscription, not push, so they resynchronize on every connection without Home Assistant automations.
 - Clear Home Assistant replay eligibility at boot and each detected disconnect. Record subsequent sensor publications even before connection detection or while disabled; on connect or re-enable, enter Initializing and replay an eligible value through the normal submit path. Keep disabled groups Off and do not display a replay candidate as current while disconnected.
 - Append native API wrappers under `api.services` to merge with ESK-1's existing buzzer service. Do not configure both `api.services` and `api.actions`.
-- Use the fixed built-in CO2, AQI, and VOC lookup tables in version 1; do not expose lookup overrides.
+- Use the fixed built-in CO2, AQI, PM2.5, VOC, and NOx lookup tables in version 1; do not expose lookup overrides.
 - Keep the version 1 palette, fill rules, effects, animation timings, and render cadence fixed in the component. Expose global brightness as the only visual setting.
 - Apply brightness and pulse multipliers in output intensity, then encode for ESPHome gamma as defined in ARCHITECTURE.md Section 12.4. Use a provisional brightness range of 25–100%, default 50%; persist global brightness and clamp restored values to that range, falling back to configured brightness when no valid saved value exists.
 - Route all sources through one internal submit path. Reject `set_group_value` on sensor-bound groups; for action-driven groups, the last call processed on the main loop wins.
-- Judge freshness by source kind. Derive local-sensor TTL as 3 × the polling interval only for known platforms and filters that publish every update; otherwise require an explicit TTL. Their initialization window is the greater of the global initialization timeout (default 30 s) and that TTL. Enabled Home Assistant sources have no TTL: they go `UnknownUnavailable` when Home Assistant disconnects and re-enter `Initializing` when it connects. Action-driven TTLs default to `never` for status, 5 minutes for CO2 and VOC, and 30 minutes for AQI. Permit a positive per-group TTL override except on Home Assistant sources.
+- Judge freshness by source kind. Derive local-sensor TTL as 3 × the polling interval only for known platforms and filters that publish every update; otherwise require an explicit TTL. Their initialization window is the greater of the global initialization timeout (default 30 s) and that TTL. Enabled Home Assistant sources have no TTL: they go `UnknownUnavailable` when Home Assistant disconnects and re-enter `Initializing` when it connects. Action-driven TTLs default to `never` for status, 5 minutes for CO2, PM2.5, VOC, and NOx, and 30 minutes for AQI. Permit a positive per-group TTL override except on Home Assistant sources.
 - Count only API clients with a state subscription as a Home Assistant connection; the dashboard log viewer does not count.
 - Keep the status-board package continuously awake: force the internal `prevent_sleep` switch on to avoid ESK-1's manual sleep branch, and have the component call `prevent_deep_sleep()` during setup to block automatic sleep. The component's `deep_sleep_id` is optional; the ESK-1 package supplies `deep_sleep_1`.
 

@@ -17,7 +17,7 @@ CasitaStatus = ns.class_("CasitaStatus", cg.Component)
 BrightnessNumber = ns.class_("BrightnessNumber", number.Number)
 InputType = ns.enum("InputType", is_class=True)
 SourceKind = ns.enum("SourceKind", is_class=True)
-TYPES = {name: getattr(InputType, name.upper()) for name in ("status", "co2", "aqi", "voc")}
+TYPES = {name: getattr(InputType, name.upper()) for name in ("status", "co2", "aqi", "voc", "pm25", "nox")}
 SetGroupValueAction = ns.class_("SetGroupValueAction", automation.Action)
 SetGroupUnavailableAction = ns.class_("SetGroupUnavailableAction", automation.Action)
 SetGroupEnabledAction = ns.class_("SetGroupEnabledAction", automation.Action)
@@ -76,7 +76,7 @@ CONFIG_SCHEMA = cv.All(
 
 # Conservative defaults: unknown platforms or filters need an explicit TTL.
 POLLING_PLATFORMS = {"scd4x", "scd30", "sht4x", "sht3xd", "aht10", "dallas_temp", "wifi_signal",
-                     "uptime", "internal_temperature", "sgp4x", "sen5x", "bme280_i2c"}
+                     "uptime", "internal_temperature", "sgp4x", "sen5x", "sen6x", "bme280_i2c"}
 PER_PUBLISH_FILTERS = {"offset", "multiply", "calibrate_linear", "calibrate_polynomial", "round", "round_to_multiple"}
 
 
@@ -95,7 +95,8 @@ def resolve_source(group, owner, bound_sensor, initialization_ms):
     """Resolve source/freshness from validated sensor and parent configs."""
     if owner is None:
         source = "ACTION"
-        default_ttl = {"status": 0, "co2": 300000, "voc": 300000, "aqi": 1800000}[group[CONF_TYPE]]
+        default_ttl = {"status": 0, "co2": 300000, "voc": 300000, "pm25": 300000, "nox": 300000,
+                       "aqi": 1800000}[group[CONF_TYPE]]
     elif owner.get("platform") == "homeassistant":
         if "ttl" in group:
             raise cv.Invalid("ttl is not allowed on Home Assistant sources")

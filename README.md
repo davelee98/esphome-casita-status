@@ -1,6 +1,6 @@
 # Casita status board
 
-An ESPHome external component that turns the ESPHome Starter Kit (ESK-1) Casita LED module into a four-zone status board. Each zone shows a status from 1 to 6, either set directly or converted from a CO2, AQI, or VOC measurement, using color, fill, and animation. Automations address zones by name and never touch individual pixels. The design is specified in [ARCHITECTURE.md](ARCHITECTURE.md).
+An ESPHome external component that turns the ESPHome Starter Kit (ESK-1) Casita LED module into a four-zone status board. Each zone shows a status from 1 to 6, either set directly or converted from a CO2, AQI, PM2.5, VOC, or NOx measurement, using color, fill, and animation. Automations address zones by name and never touch individual pixels. The design is specified in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Requirements
 
@@ -83,7 +83,7 @@ All four groups must be configured. Each one has a fixed position on the module:
 
 | Option | Required | Description |
 |---|---|---|
-| `type` | yes | How the value is interpreted: `status`, `co2`, `aqi`, or `voc`. See [Values](#values). |
+| `type` | yes | How the value is interpreted: `status`, `co2`, `aqi`, `pm25`, `voc`, or `nox`. See [Values](#values). |
 | `sensor` | no | ID of a numeric sensor that feeds this group. Omit it to drive the group with actions. See [Sources](#sources). |
 | `enabled` | no | Whether the group is on at boot. Default `true`. A disabled group stays dark. |
 | `ttl` | no | How long a value stays current before the group shows Unknown. A positive duration such as `10min`, or `never` for action-driven `status` groups. Not allowed on Home Assistant sensors. |
@@ -106,9 +106,11 @@ The package already sets `id`, `light_id`, and `deep_sleep_id`; do not change th
 | `status` | Whole numbers 1 to 6 (`4` and `4.0` are valid) | Used as is |
 | `co2` | CO2 in ppm, 0 or more | ≤800 → 1, ≤1000 → 2, ≤1500 → 3, ≤2000 → 4, ≤2500 → 5, above → 6 |
 | `aqi` | Already-computed U.S. EPA AQI, 0 or more | ≤50 → 1, ≤100 → 2, ≤150 → 3, ≤200 → 4, ≤300 → 5, above → 6 |
+| `pm25` | PM2.5 in µg/m³, 0 or more | ≤9.0 → 1, ≤35.4 → 2, ≤55.4 → 3, ≤125.4 → 4, ≤225.4 → 5, above → 6 |
 | `voc` | Sensirion VOC Index, 1 to 500 | <80 → 1, <150 → 2, <250 → 3, <400 → 4, ≤500 → 5 |
+| `nox` | Sensirion NOx Index, 1 to 500 | <20 → 1, <50 → 2, <100 → 3, <250 → 4, ≤500 → 5 |
 
-`aqi` expects an AQI value, not a raw PM2.5 concentration, and `voc` expects the Sensirion VOC Index, not TVOC in ppb. Values outside the accepted range, `NaN`, and Home Assistant `unknown` or `unavailable` all show Unknown.
+`aqi` expects an already-computed AQI value. For a PM2.5 sensor, use `pm25` instead: it applies the 2024 U.S. EPA PM2.5 breakpoints, which match the AQI bands, after truncating to 0.1 µg/m³ as the EPA does. `voc` and `nox` expect the Sensirion VOC and NOx Indexes, not TVOC in ppb or NOx concentrations. The NOx Index rests at 1 in clean air, so its bands are much lower than the VOC bands. Values outside the accepted range, `NaN`, and Home Assistant `unknown` or `unavailable` all show Unknown.
 
 ## Sources
 
@@ -129,7 +131,7 @@ casita_status:
       sensor: ha_bedroom_co2
 ```
 
-**Local sensor.** Bind a sensor attached to the device. For known polling sensors whose filters publish on every update, the TTL defaults to three times the sensor's `update_interval`. For any other sensor, including `template` and `copy` sensors and filters such as `throttle`, `delta`, or `lambda`, validation requires an explicit `ttl`. Local groups keep working without Home Assistant.
+**Local sensor.** Bind a sensor attached to the device. For known polling sensors (`scd4x`, `scd30`, `sht4x`, `sht3xd`, `aht10`, `dallas_temp`, `sgp4x`, `sen5x`, `sen6x`, `bme280_i2c`, `wifi_signal`, `uptime`, `internal_temperature`) whose filters publish on every update, the TTL defaults to three times the sensor's `update_interval`. For any other sensor, including `template` and `copy` sensors and filters such as `throttle`, `delta`, or `lambda`, validation requires an explicit `ttl`. Local groups keep working without Home Assistant.
 
 ```yaml
 sensor:
@@ -145,7 +147,7 @@ casita_status:
       sensor: room_co2      # TTL defaults to 3 x 60s
 ```
 
-**Actions.** Omit `sensor` and set values with `casita_status.set_group_value` or the Home Assistant action. Values are not restored after a reboot, so the caller must resend them. The default TTL is `never` for `status`, 5 minutes for `co2` and `voc`, and 30 minutes for `aqi`. If a value already exists as a Home Assistant entity, bind it as a sensor instead.
+**Actions.** Omit `sensor` and set values with `casita_status.set_group_value` or the Home Assistant action. Values are not restored after a reboot, so the caller must resend them. The default TTL is `never` for `status`, 5 minutes for `co2`, `pm25`, `voc`, and `nox`, and 30 minutes for `aqi`. If a value already exists as a Home Assistant entity, bind it as a sensor instead.
 
 ## Actions
 
