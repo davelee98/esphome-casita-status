@@ -564,7 +564,7 @@ The package must verify at configuration/compile time where possible, and at run
 
 The production implementation is a local ESPHome external component under `components/casita_status/`. Its Python module owns schema validation, ID references, code generation, and synchronous automation-action registration. Its C++ class owns state resolution, fixed lookup translation, TTL timing, animation, diagnostics, and complete-frame rendering.
 
-The minimum supported ESPHome release is 2026.3.0. The component's Python validation enforces this minimum independently of the YAML `esphome.min_version` value, which can be replaced during package merging. Automation actions declare `synchronous=True`, and templatable primitive arguments use the current documented code-generation path. CI also compiles against current stable ESPHome so later API changes are caught promptly.
+The minimum supported ESPHome release is 2026.3.0. The component's Python validation enforces this minimum independently of the YAML `esphome.min_version` value, which can be replaced during package merging. Automation actions declare `synchronous=True`, and templatable primitive arguments use the current documented code-generation path. Validation and compilation are also run against current stable ESPHome so later API changes are caught promptly.
 
 The addressable-lambda fragment above is only a thin, package-owned bridge that supplies ESPHome's existing addressable buffer to the C++ renderer. It does not contain policy or duplicate rendering logic. The renderer contains:
 

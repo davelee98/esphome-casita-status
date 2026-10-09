@@ -252,7 +252,7 @@ python3 -m venv .venv-linux
 .venv-linux/bin/python -m esphome compile examples/esk1_basic_status_board.yaml
 ```
 
-Repeat validation and compilation with the current stable release. CI tests both the minimum and current versions. Host tests exercise the standalone C++ core; Python tests validate real merged configurations and expected failures. Host frame tests do not run ESPHome's gamma or LED driver.
+Repeat validation and compilation with the current stable release, so both the minimum and current versions are covered. Host tests exercise the standalone C++ core; Python tests validate real merged configurations and expected failures. Host frame tests do not run ESPHome's gamma or LED driver.
 
 For hardware checks, compile [the device-check configuration](tests/integration/esk1_device_checks.yaml). It logs a PASS/FAIL result for gamma-corrected pulse troughs, disabled pixels, and center off-notches. See [the physical check instructions](tests/integration/DEVICE_CHECKS.md). Compilation is verified; hardware execution and physical readability checks are still pending.
 
