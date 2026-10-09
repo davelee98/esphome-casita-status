@@ -59,6 +59,15 @@ def test_polling_parent_and_filter_policy():
         component.resolve_source({CONF_TYPE: "aqi"}, {"platform": "copy"}, {}, 30000)
 
 
+def test_template_sensor_requires_explicit_ttl():
+    owner = {"platform": "template", "update_interval": component.positive_duration("60s"), "lambda": "return {};"}
+    group = {CONF_TYPE: "co2"}
+    with pytest.raises(cv.Invalid, match="specify ttl"):
+        component.resolve_source(group, owner, owner, 30000)
+    group["ttl"] = component.ttl("5min")
+    assert component.resolve_source(group, owner, owner, 30000) == ("LOCAL", 300000, 300000)
+
+
 @pytest.mark.parametrize("value", ["0s", "never", "2147483648ms"])
 def test_duration_bounds(value):
     with pytest.raises(cv.Invalid):
@@ -121,10 +130,9 @@ def test_device_check_config():
 
 def test_suppressed_polling_requires_ttl(tmp_path):
     path = fixture_config(tmp_path, """sensor:
-  - platform: template
+  - platform: wifi_signal
     id: local_measurement
     update_interval: 60s
-    lambda: return 700;
     filters:
       - throttle: 5min
 """)

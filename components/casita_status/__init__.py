@@ -75,7 +75,7 @@ CONFIG_SCHEMA = cv.All(
 
 # Conservative defaults: unknown platforms or filters need an explicit TTL.
 POLLING_PLATFORMS = {"scd4x", "scd30", "sht4x", "sht3xd", "aht10", "dallas_temp", "wifi_signal",
-                     "uptime", "internal_temperature", "template", "sgp4x", "sen5x", "bme280_i2c"}
+                     "uptime", "internal_temperature", "sgp4x", "sen5x", "bme280_i2c"}
 PER_PUBLISH_FILTERS = {"offset", "multiply", "calibrate_linear", "calibrate_polynomial", "round", "round_to_multiple"}
 
 
@@ -103,9 +103,6 @@ def resolve_source(group, owner, bound_sensor, initialization_ms):
         source = "LOCAL"
         interval = owner.get("update_interval")
         known = owner.get("platform") in POLLING_PLATFORMS and interval is not None
-        # A template sensor with only external publishes has no polling contract.
-        if owner.get("platform") == "template" and "lambda" not in owner:
-            known = False
         default_ttl = 0
         if known and filters_publish_every_update(bound_sensor.get("filters", [])):
             default_ttl = interval.total_milliseconds * 3
@@ -183,10 +180,7 @@ async def to_code(config):
     cg.add(var.set_brightness_number(brightness))
     for index, name in enumerate(GROUPS):
         group = config["groups"][name]
-        diagnostic = group["state"]
-        if "name" not in diagnostic:
-            diagnostic["name"] = f"Casita {name.title()} State"
-        entity = await text_sensor.new_text_sensor(diagnostic)
+        entity = await text_sensor.new_text_sensor(group["state"])
         bound_sensor = await cg.get_variable(group[CONF_SENSOR]) if CONF_SENSOR in group else cg.nullptr
         cg.add(var.configure_group(index, TYPES[group[CONF_TYPE]], getattr(SourceKind, group["_source"]),
                                    group["enabled"], group["_ttl_ms"], group["_initialization_ms"], bound_sensor,

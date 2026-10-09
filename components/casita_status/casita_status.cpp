@@ -81,10 +81,6 @@ void CasitaStatus::loop() {
   board_.tick(now);
   report_("source deadline");
   ensure_renderer_();
-  if (uint32_t(now - last_diagnostic_) >= 60000) {
-    last_diagnostic_ = now;
-    dump_config();
-  }
 }
 void CasitaStatus::render(light::AddressableLight &output, bool initial_run) {
   if (!initialized_ || is_failed() || !light_->is_ready()) return;
