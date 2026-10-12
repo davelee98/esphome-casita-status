@@ -78,7 +78,9 @@ void CasitaStatus::ensure_renderer_() {
 void CasitaStatus::loop() {
   const uint32_t now = millis();
   connection_(now);
+  const bool testing = board_.testing();
   board_.tick(now);
+  if (testing && !board_.testing()) ESP_LOGI(TAG, "Self-test finished");
   report_("source deadline");
   ensure_renderer_();
 }
@@ -103,6 +105,15 @@ void CasitaStatus::set_suspended(bool suspended) {
   suspended_ = suspended;
   ESP_LOGI(TAG, "Renderer %s", suspended ? "suspended" : "resumed");
   if (!suspended) frame_valid_ = false;
+}
+void CasitaStatus::run_test() {
+  if (!initialized_) return;
+  if (suspended_) {
+    ESP_LOGW(TAG, "Self-test not started: renderer is suspended");
+    return;
+  }
+  board_.start_test(millis());
+  ESP_LOGI(TAG, "Self-test started (%lu s)", static_cast<unsigned long>(TEST_DURATION_MS / 1000));
 }
 int CasitaStatus::resolve_group_(const std::string &name) {
   const int index = group_index(name.c_str());

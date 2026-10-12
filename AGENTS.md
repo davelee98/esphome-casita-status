@@ -8,24 +8,24 @@ The primary specification is [ARCHITECTURE.md](ARCHITECTURE.md). Read it before 
 
 ## Fixed physical mapping
 
-PCB LED designators are one-based; ESPHome indices are zero-based. The data chain starts at the upper-right roof LED and travels clockwise around the perimeter, ending at the roof peak.
+The data chain starts at the roof peak (LED10, index 0) and travels clockwise around the perimeter, ending at the upper-left roof. Other designators match their index (LED1 is index 1). This order was confirmed on hardware; do not revert to the earlier upper-right-roof start.
 
 ```text
-                         LED10 / index 9
-                  LED9 / 8       LED1 / 0
-             LED8 / 7               LED2 / 1
-             LED7 / 6               LED3 / 2
-                  LED6 / 5  LED5 / 4  LED4 / 3
+                         LED10 / index 0
+                  LED9 / 9       LED1 / 1
+             LED8 / 8               LED2 / 2
+             LED7 / 7               LED3 / 3
+                  LED6 / 6  LED5 / 5  LED4 / 4
 ```
 
 The four logical groups are fixed:
 
 | Group | Membership | Render order |
 |---|---|---|
-| `left` | indices 5, 6, 7 | 5, 6, 7; bottom to top |
-| `right` | indices 1, 2, 3 | 3, 2, 1; bottom to top |
-| `center` | index 4 | 4 |
-| `top` | indices 8, 9, 0 | 8, 9, 0; left to right |
+| `left` | indices 6, 7, 8 | 6, 7, 8; bottom to top |
+| `right` | indices 2, 3, 4 | 4, 3, 2; bottom to top |
+| `center` | index 5 | 5 |
+| `top` | indices 9, 0, 1 | 9, 1, 0; upper-left roof, upper-right roof, then peak |
 
 The `top` group wraps across the end of the WS2812 chain. Keep that implementation detail behind the renderer.
 
@@ -96,6 +96,7 @@ A large collection of YAML globals, scripts, and duplicated lambdas is acceptabl
 - Treat Off as enablement state only; disabling invalidates current data, and re-enabling starts in `Initializing`.
 - Default configured group enablement to true and reapply it on each device boot. Do not persist runtime enablement changes; repeated enable/disable calls matching the current state are no-ops.
 - Treat Initializing as lifecycle-only; no public action may set it.
+- Keep `run_test` a frame overlay with a fixed sequence. It must not change group states, and it is ignored while suspended.
 - Keep status 6 group-local. No status may create a full-board overlay or activate the buzzer.
 - Do not add configuration for colors, fills, effects, animation timings, render cadence, or per-channel calibration in version 1.
 - Do not vendor Apollo ESK-1 files into this repository; they are licensed CC BY-NC-SA 4.0. Include the official ESK-1 YAML as an ESPHome remote package pinned to an upstream commit.

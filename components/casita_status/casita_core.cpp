@@ -54,6 +54,7 @@ float restored_brightness(float configured, std::optional<float> saved) {
 void Board::boot(uint32_t now) {
   states_ = {};
   replay_values_ = {};
+  test_started_.reset();
   connected_ = false;
   dirty_ = true;
   for (uint8_t i = 0; i < 4; ++i) {
@@ -130,6 +131,10 @@ void Board::set_unavailable(uint8_t group, uint32_t now) {
   if (states_[group].display_state != OFF) transition_(group, UNKNOWN, now);
 }
 void Board::tick(uint32_t now) {
+  if (test_started_ && uint32_t(now - *test_started_) >= TEST_DURATION_MS) {
+    test_started_.reset();
+    dirty_ = true;
+  }
   for (uint8_t i = 0; i < 4; ++i) {
     const auto &config = configs_[i];
     const auto &runtime = states_[i];
@@ -146,6 +151,7 @@ void Board::set_brightness(float value) {
   dirty_ = true;
 }
 bool Board::animated() const {
+  if (test_started_) return true;
   for (uint8_t i = 0; i < 4; ++i) {
     const auto state = states_[i].display_state;
     if (state < OFF || state >= 5 || (i == 2 && state >= 2)) return true;
@@ -160,39 +166,59 @@ static uint8_t encode(double value) {
   return static_cast<uint8_t>(std::lround(std::clamp(value, 0.0, 1.0) * 255));
 }
 Frame Board::frame(uint32_t now) const {
+  Frame frame{};
+  if (test_started_ && uint32_t(now - *test_started_) < TEST_DURATION_MS) {
+    uint32_t t = now - *test_started_;
+    if (t < TEST_WALK_MS) {
+      const auto channel = encode(std::pow(brightness_, 1 / 2.8));
+      frame[t / TEST_PIXEL_MS] = {channel, channel, channel};
+      return frame;
+    }
+    t -= TEST_WALK_MS;
+    int8_t state;
+    uint32_t elapsed;
+    if (t < TEST_STATUSES_MS) {
+      state = static_cast<int8_t>(1 + t / TEST_STATUS_MS);
+      elapsed = t % TEST_STATUS_MS;
+    } else {
+      t -= TEST_STATUSES_MS;
+      state = t < TEST_META_MS ? INITIALIZING : UNKNOWN;
+      elapsed = t % TEST_META_MS;
+    }
+    for (uint8_t i = 0; i < 4; ++i) draw_(frame, i, state, elapsed);
+    return frame;
+  }
+  for (uint8_t i = 0; i < 4; ++i) draw_(frame, i, states_[i].display_state, now - states_[i].resolved_since);
+  return frame;
+}
+void Board::draw_(Frame &frame, uint8_t group, int8_t state, uint32_t elapsed) const {
   static constexpr std::array<RGB, 6> PALETTE{{{0, 255, 0}, {255, 255, 0}, {255, 128, 0},
                                                             {255, 0, 0}, {153, 0, 255}, {128, 0, 0}}};
-  Frame frame{};
-  for (uint8_t i = 0; i < 4; ++i) {
-    const auto state = states_[i].display_state;
-    const auto &map = GROUP_MAP[i];
-    const uint32_t elapsed = now - states_[i].resolved_since;
-    if (state == OFF) continue;
-    RGB color;
-    uint8_t count = map.size;
-    double multiplier = 1;
-    if (state == UNKNOWN) {
-      const auto channel = encode(std::pow(0.15 * brightness_ * pulse(elapsed, 3000), 1 / 2.8));
-      color = {channel, channel, channel};
+  const auto &map = GROUP_MAP[group];
+  if (state == OFF) return;
+  RGB color;
+  uint8_t count = map.size;
+  double multiplier = 1;
+  if (state == UNKNOWN) {
+    const auto channel = encode(std::pow(0.15 * brightness_ * pulse(elapsed, 3000), 1 / 2.8));
+    color = {channel, channel, channel};
+  } else {
+    if (state == INITIALIZING) {
+      color = {0, 0, 255};
+      if (map.size == 1) multiplier = pulse(elapsed, 2000);
     } else {
-      if (state == INITIALIZING) {
-        color = {0, 0, 255};
-        if (map.size == 1) multiplier = pulse(elapsed, 2000);
-      } else {
-        color = PALETTE[state - 1];
-        count = std::min<uint8_t>(map.size, state);
-        if (state == 5 || state == 6) multiplier = pulse(elapsed, state == 5 ? 3000 : 500);
-        if (map.size == 1 && state >= 2 && state <= 4) {
-          const uint32_t phase = elapsed % 6000;
-          if (phase / 300 < uint32_t(state - 1) && phase % 300 < 120) continue;
-        }
+      color = PALETTE[state - 1];
+      count = std::min<uint8_t>(map.size, state);
+      if (state == 5 || state == 6) multiplier = pulse(elapsed, state == 5 ? 3000 : 500);
+      if (map.size == 1 && state >= 2 && state <= 4) {
+        const uint32_t phase = elapsed % 6000;
+        if (phase / 300 < uint32_t(state - 1) && phase % 300 < 120) return;
       }
-      const double scale = std::pow(brightness_ * multiplier, 1 / 2.8);
-      color = {encode(color.r / 255.0 * scale), encode(color.g / 255.0 * scale), encode(color.b / 255.0 * scale)};
     }
-    if (state == INITIALIZING && map.size > 1) frame[map.pixels[(elapsed / 250) % map.size]] = color;
-    else for (uint8_t pixel = 0; pixel < count; ++pixel) frame[map.pixels[pixel]] = color;
+    const double scale = std::pow(brightness_ * multiplier, 1 / 2.8);
+    color = {encode(color.r / 255.0 * scale), encode(color.g / 255.0 * scale), encode(color.b / 255.0 * scale)};
   }
-  return frame;
+  if (state == INITIALIZING && map.size > 1) frame[map.pixels[(elapsed / 250) % map.size]] = color;
+  else for (uint8_t pixel = 0; pixel < count; ++pixel) frame[map.pixels[pixel]] = color;
 }
 }  // namespace esphome::casita_status

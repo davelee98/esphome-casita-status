@@ -177,6 +177,18 @@ def test_sen6x_pm25_and_nox(tmp_path):
     assert result.stdout.count("_ttl_ms: 180000") == 2
 
 
+def test_run_test_button(tmp_path):
+    path = fixture_config(tmp_path, """button:
+  - platform: template
+    name: Casita Self Test
+    on_press:
+      - casita_status.run_test: casita_board
+""")
+    result = run_config(path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "casita_status.run_test" in result.stdout
+
+
 def test_no_deep_sleep_binding(tmp_path):
     path = tmp_path / "config.yaml"
     path.write_text(f"""esphome:

@@ -1,8 +1,8 @@
 # Casita Status Board Architecture
 
 Status: Proposed  
-Version: 0.12
-Last updated: 2026-10-09
+Version: 0.14
+Last updated: 2026-10-12
 
 ## 1. Purpose
 
@@ -57,32 +57,32 @@ Device configurations include the ESK-1 YAML as an ESPHome remote package pinned
 
 ## 4. Physical LED topology
 
-PCB designators are one-based (`LED1` through `LED10`). ESPHome addressable-light indices are zero-based (`0` through `9`). The physical data chain starts at the upper-right roof LED, travels clockwise down the right side, around the base, and up the left side, and ends at the roof peak.
+PCB designators run from `LED1` through `LED10`; ESPHome addressable-light indices run from `0` through `9`. The physical data chain starts at the roof peak (`LED10`), travels clockwise down the right side, around the base, and up the left side, and ends at the upper-left roof LED. Designator numbers therefore match ESPHome indices except at the peak, where `LED10` is index `0`. Hardware testing confirmed this order on 2026-10-12; versions before 0.13 assumed the chain started at the upper-right roof, which put every pixel one position counter-clockwise of its intended place.
 
 ```text
-                         LED10 / index 9
+                         LED10 / index 0
 
-                  LED9 / 8       LED1 / 0
+                  LED9 / 9       LED1 / 1
 
-             LED8 / 7               LED2 / 1
+             LED8 / 8               LED2 / 2
 
-             LED7 / 6               LED3 / 2
+             LED7 / 7               LED3 / 3
 
-                  LED6 / 5  LED5 / 4  LED4 / 3
+                  LED6 / 6  LED5 / 5  LED4 / 4
 ```
 
 | Physical position | PCB designator | ESPHome index |
 |---|---:|---:|
-| Upper-right roof | LED1 | 0 |
-| Upper-right side | LED2 | 1 |
-| Lower-right side | LED3 | 2 |
-| Bottom-right | LED4 | 3 |
-| Bottom center | LED5 | 4 |
-| Bottom-left | LED6 | 5 |
-| Lower-left side | LED7 | 6 |
-| Upper-left side | LED8 | 7 |
-| Upper-left roof | LED9 | 8 |
-| Roof peak | LED10 | 9 |
+| Roof peak | LED10 | 0 |
+| Upper-right roof | LED1 | 1 |
+| Upper-right side | LED2 | 2 |
+| Lower-right side | LED3 | 3 |
+| Bottom-right | LED4 | 4 |
+| Bottom center | LED5 | 5 |
+| Bottom-left | LED6 | 6 |
+| Lower-left side | LED7 | 7 |
+| Upper-left side | LED8 | 8 |
+| Upper-left roof | LED9 | 9 |
 
 ## 5. Logical groups
 
@@ -90,21 +90,21 @@ The public model contains exactly four groups. Pixel order is part of the privat
 
 | Group ID | Description | PCB LEDs | ESPHome membership | Render/fill order |
 |---|---|---|---|---|
-| `left` | Bottom-left three | LED6, LED7, LED8 | 5, 6, 7 | 5, 6, 7; bottom to top |
-| `right` | Bottom-right three | LED2, LED3, LED4 | 1, 2, 3 | 3, 2, 1; bottom to top |
-| `center` | Bottom-center indicator | LED5 | 4 | 4 |
-| `top` | Top three | LED9, LED10, LED1 | 8, 9, 0 | 8, 9, 0; left to right |
+| `left` | Bottom-left three | LED6, LED7, LED8 | 6, 7, 8 | 6, 7, 8; bottom to top |
+| `right` | Bottom-right three | LED2, LED3, LED4 | 2, 3, 4 | 4, 3, 2; bottom to top |
+| `center` | Bottom-center indicator | LED5 | 5 | 5 |
+| `top` | Top three | LED9, LED10, LED1 | 9, 0, 1 | 9, 1, 0; upper-left roof, upper-right roof, then peak |
 
 ```text
                            TOP
-                        LED10 / 9
-                 LED9 / 8   LED1 / 0
+                        LED10 / 0
+                 LED9 / 9   LED1 / 1
 
              LEFT                  RIGHT
-             LED8 / 7              LED2 / 1
-             LED7 / 6              LED3 / 2
+             LED8 / 8              LED2 / 2
+             LED7 / 7              LED3 / 3
 
-             LED6 / 5   LED5 / 4   LED4 / 3
+             LED6 / 6   LED5 / 5   LED4 / 4
                            CENTER
 ```
 
@@ -475,9 +475,12 @@ set_group_value(group_id, numeric_value)
 set_group_unavailable(group_id)
 set_group_enabled(group_id, boolean)
 set_global_brightness(percent)
+run_test()
 ```
 
 Local ESPHome automations also expose `casita_status.suspend` and `casita_status.resume`, accepting either a component ID directly or an `id:` mapping. These synchronous actions hand over output ownership; they are not Home Assistant services, group operations, or display states. Put them first in the other component's start and finish automations, before any delay or deferred work.
+
+`casita_status.run_test` starts a fixed self-test, accepting either a component ID directly or an `id:` mapping. It is intended for a template button in the device YAML and is not a Home Assistant service. The sequence is fixed policy: a white dot walks the chain from index 0 through 9 at 400 ms per pixel; every group then shows statuses 1 through 6 for 2 seconds each; finally every group shows Initializing and then Unknown/Unavailable for 3 seconds each, about 22 seconds in total. The test lights every group, including disabled ones, so the module and LED order can be checked by eye. It overlays only the rendered frame: group states, sensor updates, deadlines, and diagnostics continue underneath, and the next frame after the test shows the current states. Calling it again restarts the sequence. It is ignored with a warning while the renderer is suspended, and it is not persisted across reboot.
 
 `set_group_value` is the sole normal-state operation for action-driven groups. The group configuration supplies its type. Calling `set_group_value` on a sensor-bound group is rejected with a warning log, because an action value would bypass that group's freshness rules and be silently overwritten by the next sensor publish. `set_group_unavailable` and `set_group_enabled` apply to every group regardless of source. For a group configured as `status`, the action accepts a finite numeric value whose mathematical value is integral and within 1 through 6; `4` and `4.0` are valid, while `4.0001`, strings, and booleans are invalid. Groups configured as `co2`, `aqi`, `pm25`, `voc`, or `nox` translate the value through the corresponding lookup table.
 
@@ -580,7 +583,7 @@ Suspension leaves the bridge effect and renderer recovery check running. The ren
 
 ### 14.3 Partitions
 
-The production package does not create light partitions. Partitions would introduce additional writers and expose the physical layout. Mapping diagnostics operate through renderer-owned test methods that still compose and commit the complete ten-pixel frame.
+The production package does not create light partitions. Partitions would introduce additional writers and expose the physical layout. Mapping diagnostics operate through renderer-owned test methods that still compose and commit the complete ten-pixel frame. The `run_test` self-test (Section 13.1) is one such method.
 
 ## 15. Update ordering and state mutation
 
@@ -719,11 +722,11 @@ Every configured group declares exactly one type and at most one `sensor`. The s
 
 The C++ core is unit-tested on the host with an injected clock. Python validation and merged ESPHome integration checks live in `tests/integration/`. Only these tests are required:
 
-1. **Mapping:** all ten pixels belong to exactly one group, fill order matches Section 5, and `top` wraps from index 9 to 0.
+1. **Mapping:** all ten pixels belong to exactly one group, fill order matches Section 5, and `top` wraps from index 9 to 0 (upper-left roof to peak).
 2. **Lookups:** every threshold in Section 11.2 lands in the correct band, and `NaN`, infinity, and out-of-range values resolve to Unknown/Unavailable.
 3. **State:** boot, disable/re-enable, initialization timeout, TTL expiry (including counter rollover), and `status` validation (`4.0` accepted, `4.0001` rejected) produce the states in Section 8. Disabled groups remain Off through invalidation, expiry, and Home Assistant connection changes. Repeated enablement calls are no-ops, and a device reboot reapplies configured enablement. Verify brightness restoration, clamping to 25–100%, and fallback to configured brightness when no valid saved value exists.
 4. **Sources:** Home Assistant disconnect invalidates only enabled Home Assistant-sourced groups; reconnect and re-enable recover an unchanged entity's current value; and `set_group_value` on a sensor-bound group is rejected. Test a sensor publication before connection detection: it does not display as current while disconnected, but connect enters Initializing and immediately replays it. Replay accepts values published since boot or the last detected disconnect, including while disabled, and rejects older retained values. A healthy filtered local sensor with a suitable explicit TTL does not falsely expire.
-5. **Renderer:** host tests compare golden ten-pixel frames for each state on one three-LED group and on `center`, and verify that a change to one group leaves the others' pixels unchanged. Renderer recovery redraws the existing states. Host tests verify the component's encoded frame; the actual ESPHome gamma/output check runs on-device in item 8.
+5. **Renderer:** host tests compare golden ten-pixel frames for each state on one three-LED group and on `center`, and verify that a change to one group leaves the others' pixels unchanged. Renderer recovery redraws the existing states. The self-test walks one pixel at a time in chain order, shows each status and meta-state on every group including disabled ones, leaves group states updating underneath, and hands back to the live frame when it ends. Host tests verify the component's encoded frame; the actual ESPHome gamma/output check runs on-device in item 8.
 6. **Validation:** Python or expected configuration-failure tests enforce the minimum ESPHome version independently of package `min_version`, reject invalid bindings, and require an explicit TTL when local sensor publication cannot be safely inferred. Test a known nested polling output, a publication-suppressing filter, and a configuration without a deep-sleep binding.
 7. **Integration/build:** the fully merged ESK-1 example compiles for ESP32-C6 on the minimum and current ESPHome releases, with one GPIO 14 driver, `rgb_module` internal, one renderer bridge that the component starts, and both sleep protections applied. Verify that the upstream boot automation and buzzer service remain present, and that native API wrappers use one compatible services/actions key. The existing device-check configuration exercises suspend and resume in short and long forms after its output observer finishes; existing validation and builds cover their schema and code generation.
 8. **Device output and physical:** on-device checks with the minimum and current ESPHome test firmware inspect the driver buffer after normal pixel assignment and gamma correction. At minimum brightness, active pulse troughs for maroon and Unknown/Unavailable remain nonzero, while Off and explicit off-notches remain zero. View each adjacent status pair and the meta-states on the module at minimum and default brightness. Confirm readable pulse troughs and that Unknown/Unavailable is distinct from Off. Validate the provisional 25% brightness floor; revise compiled visual policy through an architecture update if readability is unacceptable. On a combined device, render unchanged steady status-1 inputs, run Fortune, and confirm an undisturbed animation followed promptly by the same steady statuses. Check for a white flash or unexpected renderer-recovery warnings.

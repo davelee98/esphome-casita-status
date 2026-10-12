@@ -77,7 +77,7 @@ All four groups must be configured. Each one has a fixed position on the module:
 | `left` | 3 on the left wall | bottom to top |
 | `right` | 3 on the right wall | bottom to top |
 | `center` | 1 at the bottom center | — |
-| `top` | 3 on the roof | left to right |
+| `top` | 3 on the roof | upper-left roof, upper-right roof, then peak |
 
 ### Group options
 
@@ -184,6 +184,26 @@ data:
 ```
 
 Brightness is the `Casita Brightness` number entity, not an action. Its value is saved and restored after a reboot.
+
+### Self-test button
+
+`casita_status.run_test` plays a self-test of about 22 seconds, then returns to normal:
+
+1. A white dot walks the LEDs in chain order, 400 ms each, starting at the roof peak and going clockwise. Use it to check the LED order.
+2. Every group shows statuses 1 to 6, 2 seconds each.
+3. Every group shows Initializing, then Unknown, 3 seconds each.
+
+To put it on a button in Home Assistant, add a template button to your device YAML:
+
+```yaml
+button:
+  - platform: template
+    name: Casita Self Test
+    on_press:
+      - casita_status.run_test: casita_board
+```
+
+The test lights every group, including disabled ones. Group values, TTLs, and diagnostics keep updating during the test, so the board shows current states as soon as it ends. Pressing it again restarts the test. It does nothing while the renderer is suspended.
 
 ## Sharing the light
 
