@@ -3,7 +3,7 @@ void test_renderer() {
   auto board = action_board();
   board.set_brightness(1);
   for (uint8_t i = 0; i < 4; ++i) board.set_enabled(i, false, 0);
-  const std::array<RGB, 6> palette{{{0, 255, 0}, {255, 255, 0}, {255, 128, 0}, {255, 0, 0}, {153, 0, 255}, {128, 0, 0}}};
+  const std::array<RGB, 6> palette{{{0, 255, 0}, {255, 255, 0}, {255, 128, 0}, {255, 0, 0}, {200, 0, 255}, {128, 0, 0}}};
   board.set_enabled(3, true, 0);
   for (int state = 1; state <= 6; ++state) {
     board.submit(3, state, false, state * 100);

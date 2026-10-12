@@ -193,7 +193,7 @@ Frame Board::frame(uint32_t now) const {
 }
 void Board::draw_(Frame &frame, uint8_t group, int8_t state, uint32_t elapsed) const {
   static constexpr std::array<RGB, 6> PALETTE{{{0, 255, 0}, {255, 255, 0}, {255, 128, 0},
-                                                            {255, 0, 0}, {153, 0, 255}, {128, 0, 0}}};
+                                                            {255, 0, 0}, {200, 0, 255}, {128, 0, 0}}};
   const auto &map = GROUP_MAP[group];
   if (state == OFF) return;
   RGB color;

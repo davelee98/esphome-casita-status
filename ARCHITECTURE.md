@@ -1,7 +1,7 @@
 # Casita Status Board Architecture
 
 Status: Proposed  
-Version: 0.14
+Version: 0.15
 Last updated: 2026-10-12
 
 ## 1. Purpose
@@ -296,7 +296,7 @@ For local-sensor and action-driven groups, a positive per-group `ttl` overrides 
 
 ## 9. Six-status scale
 
-The fixed version 1 six-status rendering adopts the ordering and simplified RGB values used by Apollo AIR-1. The integers are ordered from lowest to highest severity, but they have no public names. Measurement-specific meaning belongs to the lookup table selected by `type`.
+The fixed version 1 six-status rendering adopts the ordering and simplified RGB values used by Apollo AIR-1, with one exception. AIR-1's purple, `153, 0, 255`, comes out of gamma 2.8 at about 61:255 red to blue and looks blue-violet on the module. Version 0.15 uses `200, 0, 255`, about 129:255 after gamma, which reads as purple and stays clearly bluer than red and maroon. The integers are ordered from lowest to highest severity, but they have no public names. Measurement-specific meaning belongs to the lookup table selected by `type`.
 
 | Status | Color | RGB | Three-LED fill | Effect |
 |---:|---|---|---:|---|
@@ -304,7 +304,7 @@ The fixed version 1 six-status rendering adopts the ordering and simplified RGB 
 | 2 | Yellow | `255, 255, 0` | 2 | Steady |
 | 3 | Orange | `255, 128, 0` | 3 | Steady |
 | 4 | Red | `255, 0, 0` | 3 | Steady |
-| 5 | Purple | `153, 0, 255` | 3 | Slow pulse |
+| 5 | Purple | `200, 0, 255` | 3 | Slow pulse |
 | 6 | Maroon | `128, 0, 0` | 3 | Fast pulse |
 
 The one-LED `center` group cannot use fill count, so it uses a restrained temporal code in addition to color:

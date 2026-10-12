@@ -48,10 +48,10 @@ The fixed version 1 six-status palette follows Apollo AIR-1 semantics:
 | 2 | Yellow | `255, 255, 0` | Two pixels, steady |
 | 3 | Orange | `255, 128, 0` | Three pixels, steady |
 | 4 | Red | `255, 0, 0` | Three pixels, steady |
-| 5 | Purple | `153, 0, 255` | Three pixels, slow pulse |
+| 5 | Purple | `200, 0, 255` | Three pixels, slow pulse |
 | 6 | Maroon | `128, 0, 0` | Three pixels, fast pulse |
 
-Color is not sufficient on its own. Preserve fill and animation as redundant encodings.
+Purple deliberately departs from AIR-1's `153, 0, 255`, which looks blue-violet after gamma 2.8. Color is not sufficient on its own. Preserve fill and animation as redundant encodings.
 
 ## Implementation direction
 
