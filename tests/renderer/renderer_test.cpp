@@ -37,13 +37,10 @@ void test_renderer() {
     board.submit(2, state, false, entered);
     auto frame = board.frame(entered);
     Frame expected{};
-    expected[5] = (state >= 2 && state <= 4) ? RGB{} : palette[state - 1];
+    expected[5] = palette[state - 1];
     CHECK(frame == expected);
-    if (state >= 2 && state <= 4) {
-      CHECK(board.frame(entered + 119)[5] == RGB{});
-      CHECK(board.frame(entered + 120)[5] == palette[state - 1]);
-      CHECK(board.frame(entered + (state - 1) * 300)[5] == palette[state - 1]);
-      CHECK(board.frame(entered + 6000)[5] == RGB{});
+    if (state <= 4) {  // Center statuses 1-4 are steady; only 5 and 6 pulse.
+      for (uint32_t offset : {119u, 300u, 999u}) CHECK(board.frame(entered + offset)[5] == palette[state - 1]);
     }
   }
   board.set_unavailable(2, 11700);

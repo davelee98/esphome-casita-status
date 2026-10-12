@@ -31,10 +31,10 @@ esphome:
         - lambda: |-
             id(checking_output) = false;
             const bool passed = id(maroon_min) > 0 && id(unknown_min) > 0 &&
-                                id(dark_pixels_ok) && id(saw_notch) && id(saw_center_on);
-            ESP_LOGI("casita_device_test", "%s: maroon_min=%d unknown_min=%d dark=%s notch=%s center_on=%s",
+                                id(dark_pixels_ok) && id(center_never_dark) && id(saw_center_on);
+            ESP_LOGI("casita_device_test", "%s: maroon_min=%d unknown_min=%d dark=%s center_steady=%s center_on=%s",
                      passed ? "PASS" : "FAIL", id(maroon_min), id(unknown_min),
-                     YESNO(id(dark_pixels_ok)), YESNO(id(saw_notch)), YESNO(id(saw_center_on)));
+                     YESNO(id(dark_pixels_ok)), YESNO(id(center_never_dark)), YESNO(id(saw_center_on)));
         - casita_status.suspend: casita_board
         - casita_status.resume:
             id: casita_board
@@ -71,9 +71,9 @@ globals:
   - id: dark_pixels_ok
     type: bool
     initial_value: 'true'
-  - id: saw_notch
+  - id: center_never_dark
     type: bool
-    initial_value: 'false'
+    initial_value: 'true'
   - id: saw_center_on
     type: bool
     initial_value: 'false'
@@ -98,5 +98,5 @@ interval:
             id(dark_pixels_ok) &= view.get_red_raw() == 0 && view.get_green_raw() == 0 && view.get_blue_raw() == 0;
           }
           const auto center = (*output)[5];
-          id(saw_notch) |= center.get_red_raw() == 0 && center.get_green_raw() == 0 && center.get_blue_raw() == 0;
+          id(center_never_dark) &= center.get_red_raw() > 0 || center.get_green_raw() > 0 || center.get_blue_raw() > 0;
           id(saw_center_on) |= center.get_red_raw() > 0 && center.get_green_raw() > 0;

@@ -234,9 +234,9 @@ The renderer effect and recovery check keep running while suspended. Group value
 | Status | Color | 3-LED groups | `center` |
 |---:|---|---|---|
 | 1 | Green | 1 LED, steady | Steady |
-| 2 | Yellow | 2 LEDs, steady | One brief blink off every 6 s |
-| 3 | Orange | 3 LEDs, steady | Two blinks off every 6 s |
-| 4 | Red | 3 LEDs, steady | Three blinks off every 6 s |
+| 2 | Yellow | 2 LEDs, steady | Steady |
+| 3 | Orange | 3 LEDs, steady | Steady |
+| 4 | Red | 3 LEDs, steady | Steady |
 | 5 | Purple | 3 LEDs, slow pulse | Slow pulse |
 | 6 | Maroon | 3 LEDs, fast pulse | Fast pulse |
 
@@ -274,7 +274,7 @@ python3 -m venv .venv-linux
 
 Repeat validation and compilation with the current stable release. CI tests both the minimum and current versions. Host tests exercise the standalone C++ core; Python tests validate real merged configurations and expected failures. Host frame tests do not run ESPHome's gamma or LED driver.
 
-For hardware checks, compile [the device-check configuration](tests/integration/esk1_device_checks.yaml). It logs a PASS/FAIL result for gamma-corrected pulse troughs, disabled pixels, and center off-notches. See [the physical check instructions](tests/integration/DEVICE_CHECKS.md). Compilation is verified; hardware execution and physical readability checks are still pending.
+For hardware checks, compile [the device-check configuration](tests/integration/esk1_device_checks.yaml). It logs a PASS/FAIL result for gamma-corrected pulse troughs, disabled pixels, and a steady center status. See [the physical check instructions](tests/integration/DEVICE_CHECKS.md). Compilation is verified; hardware execution and physical readability checks are still pending.
 
 ## License
 

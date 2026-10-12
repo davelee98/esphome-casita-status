@@ -1,7 +1,7 @@
 # Casita Status Board Architecture
 
 Status: Proposed  
-Version: 0.16
+Version: 0.17
 Last updated: 2026-10-12
 
 ## 1. Purpose
@@ -307,18 +307,7 @@ The fixed version 1 six-status rendering adopts the ordering and simplified RGB 
 | 5 | Purple | `200, 0, 255` | 3 | Slow pulse |
 | 6 | Maroon | `128, 0, 0` | 3 | Fast pulse |
 
-The one-LED `center` group cannot use fill count, so it uses a restrained temporal code in addition to color:
-
-| Center status | Redundant encoding |
-|---:|---|
-| 1 | Steady |
-| 2 | One brief off-notch at the start of each 6-second cycle |
-| 3 | Two brief off-notches at the start of each 6-second cycle |
-| 4 | Three brief off-notches at the start of each 6-second cycle |
-| 5 | Slow pulse |
-| 6 | Fast pulse |
-
-An off-notch is 120 ms, separated by 180 ms at the status color. A status change resets the temporal-code phase and takes effect on the next render frame. These are fixed version 1 timings. Physical validation may motivate a later architecture revision, but they are not user configuration.
+The one-LED `center` group cannot use fill count. Statuses 1 through 4 are steady and distinguished on `center` by color alone; statuses 5 and 6 keep their slow and fast pulses. Versions before 0.17 added brief off-notches to center statuses 2 through 4 (one to three every 6 seconds). They were removed because the periodic blinking was distracting, accepting that `center` relies on color for statuses 1 through 4.
 
 ### 9.1 Color limitations
 
@@ -435,7 +424,6 @@ Fixed version 1 render cadence and timing:
 - Slow pulse: 3 seconds per cycle.
 - Fast pulse: 500 ms per cycle.
 - Initializing center breathing pulse: 2 seconds per cycle.
-- Center status 1 through 4 temporal-code cycle: 6 seconds, using the notch timings in Section 9.
 
 These values are compiled constants, not schema options. Effects remain legible rather than visually aggressive, and version 1 provides no rapid-strobe effect.
 
@@ -454,7 +442,7 @@ pixel_input   = target_output^(1 / 2.8)
               = c * (b * p)^(1 / 2.8)
 ```
 
-For Unknown/Unavailable, use `base_output = 0.15` on each RGB channel. Off, unfilled pixels, and explicit center off-notches have `target_output = 0`. The component applies the multipliers once and encodes the result before assigning pixels; ESPHome then applies its normal gamma correction. Version 1 exposes no gamma override or per-channel calibration.
+For Unknown/Unavailable, use `base_output = 0.15` on each RGB channel. Off and unfilled pixels have `target_output = 0`. The component applies the multipliers once and encodes the result before assigning pixels; ESPHome then applies its normal gamma correction. Version 1 exposes no gamma override or per-channel calibration.
 
 Use sufficient intermediate precision and quantize only when writing the encoded channel values. Validate the resulting driver bytes through the supported ESPHome gamma/output path, including its integer rounding, rather than testing only the ideal formula. At the provisional 25% brightness floor and 25% pulse trough, maroon and Unknown/Unavailable each target roughly two output counts per active channel. Their active pulse troughs must remain nonzero in the supported output paths; physical readability still requires hardware validation.
 
@@ -729,7 +717,7 @@ The C++ core is unit-tested on the host with an injected clock. Python validatio
 5. **Renderer:** host tests compare golden ten-pixel frames for each state on one three-LED group and on `center`, and verify that a change to one group leaves the others' pixels unchanged. Renderer recovery redraws the existing states. The self-test walks one pixel at a time in chain order, shows each status and meta-state on every group including disabled ones, leaves group states updating underneath, and hands back to the live frame when it ends. Host tests verify the component's encoded frame; the actual ESPHome gamma/output check runs on-device in item 8.
 6. **Validation:** Python or expected configuration-failure tests enforce the minimum ESPHome version independently of package `min_version`, reject invalid bindings, and require an explicit TTL when local sensor publication cannot be safely inferred. Test a known nested polling output, a publication-suppressing filter, and a configuration without a deep-sleep binding.
 7. **Integration/build:** the fully merged ESK-1 example compiles for ESP32-C6 on the minimum and current ESPHome releases, with one GPIO 14 driver, `rgb_module` internal, one renderer bridge that the component starts, and both sleep protections applied. Verify that the upstream boot automation and buzzer service remain present, and that native API wrappers use one compatible services/actions key. The existing device-check configuration exercises suspend and resume in short and long forms after its output observer finishes; existing validation and builds cover their schema and code generation.
-8. **Device output and physical:** on-device checks with the minimum and current ESPHome test firmware inspect the driver buffer after normal pixel assignment and gamma correction. At minimum brightness, active pulse troughs for maroon and Unknown/Unavailable remain nonzero, while Off and explicit off-notches remain zero. View each adjacent status pair and the meta-states on the module at minimum and default brightness. Confirm readable pulse troughs and that Unknown/Unavailable is distinct from Off. Validate the provisional 25% brightness floor; revise compiled visual policy through an architecture update if readability is unacceptable. On a combined device, render unchanged steady status-1 inputs, run Fortune, and confirm an undisturbed animation followed promptly by the same steady statuses. Check for a white flash or unexpected renderer-recovery warnings.
+8. **Device output and physical:** on-device checks with the minimum and current ESPHome test firmware inspect the driver buffer after normal pixel assignment and gamma correction. At minimum brightness, active pulse troughs for maroon and Unknown/Unavailable remain nonzero, while Off pixels remain zero and steady statuses on `center` never go dark. View each adjacent status pair and the meta-states on the module at minimum and default brightness. Confirm readable pulse troughs and that Unknown/Unavailable is distinct from Off. Validate the provisional 25% brightness floor; revise compiled visual policy through an architecture update if readability is unacceptable. On a combined device, render unchanged steady status-1 inputs, run Fortune, and confirm an undisturbed animation followed promptly by the same steady statuses. Check for a white flash or unexpected renderer-recovery warnings.
 
 ## 21. Acceptance criteria
 
@@ -739,7 +727,7 @@ The first implementation is complete when:
 2. Automations can set a direct integer status, a typed CO2/AQI/PM2.5/VOC/NOx value, Unknown/Unavailable, or enabled/Off without knowing pixel indices; Initializing remains lifecycle-only.
 3. Every valid typed value resolves deterministically to an integer status from 1 through 6.
 4. Off, Unknown/Unavailable, and Initializing are visually distinct.
-5. Statuses remain distinguishable through fill or temporal animation in addition to color, including on the center group.
+5. On three-LED groups, statuses remain distinguishable through fill or animation in addition to color. On `center`, statuses 5 and 6 are distinguished by animation; statuses 1 through 4 rely on color.
 6. A change to one group does not alter another group.
 7. The top group's chain wrap is invisible to callers.
 8. Exactly one component writes the raw ten-pixel frame at a time. Another on-device component may write only while Casita is explicitly suspended, without changing light state, effect, or brightness.

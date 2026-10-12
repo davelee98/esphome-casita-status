@@ -154,7 +154,7 @@ bool Board::animated() const {
   if (test_started_) return true;
   for (uint8_t i = 0; i < 4; ++i) {
     const auto state = states_[i].display_state;
-    if (state < OFF || state >= 5 || (i == 2 && state >= 2)) return true;
+    if (state < OFF || state >= 5) return true;
   }
   return false;
 }
@@ -210,10 +210,6 @@ void Board::draw_(Frame &frame, uint8_t group, int8_t state, uint32_t elapsed) c
       color = PALETTE[state - 1];
       count = std::min<uint8_t>(map.size, state);
       if (state == 5 || state == 6) multiplier = pulse(elapsed, state == 5 ? 3000 : 500);
-      if (map.size == 1 && state >= 2 && state <= 4) {
-        const uint32_t phase = elapsed % 6000;
-        if (phase / 300 < uint32_t(state - 1) && phase % 300 < 120) return;
-      }
     }
     const double scale = std::pow(brightness_ * multiplier, 1 / 2.8);
     color = {encode(color.r / 255.0 * scale), encode(color.g / 255.0 * scale), encode(color.b / 255.0 * scale)};
