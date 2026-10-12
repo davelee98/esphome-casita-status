@@ -15,7 +15,7 @@ struct GroupMap {
   std::array<uint8_t, 3> pixels;
   uint8_t size;
 };
-constexpr std::array<GroupMap, 4> GROUP_MAP{{{{5, 6, 7}, 3}, {{3, 2, 1}, 3}, {{4, 4, 4}, 1}, {{8, 9, 0}, 3}}};
+constexpr std::array<GroupMap, 4> GROUP_MAP{{{{6, 7, 8}, 3}, {{4, 3, 2}, 3}, {{5, 5, 5}, 1}, {{9, 1, 0}, 3}}};
 struct RGB {
   uint8_t r{0}, g{0}, b{0};
   bool operator==(const RGB &other) const { return r == other.r && g == other.g && b == other.b; }
@@ -47,6 +47,11 @@ const char *source_name(SourceKind source);
 uint32_t default_action_ttl(InputType type);
 float restored_brightness(float configured, std::optional<float> saved);
 
+// Self-test: a dot walks the chain, then all groups show statuses 1-6, Initializing, and Unknown.
+constexpr uint32_t TEST_PIXEL_MS = 400, TEST_STATUS_MS = 2000, TEST_META_MS = 3000;
+constexpr uint32_t TEST_WALK_MS = 10 * TEST_PIXEL_MS, TEST_STATUSES_MS = 6 * TEST_STATUS_MS;
+constexpr uint32_t TEST_DURATION_MS = TEST_WALK_MS + TEST_STATUSES_MS + 2 * TEST_META_MS;
+
 // Clock values are injected into every operation; the core has no ESPHome dependency.
 class Board {
  public:
@@ -65,15 +70,20 @@ class Board {
   Frame frame(uint32_t now) const;
   bool animated() const;
   bool take_dirty() { bool value = dirty_; dirty_ = false; return value; }
+  // The test overlays the frame only; group states keep updating underneath.
+  void start_test(uint32_t now) { test_started_ = now; dirty_ = true; }
+  bool testing() const { return test_started_.has_value(); }
 
  protected:
   void transition_(uint8_t group, int8_t state, uint32_t now);
   void initialize_(uint8_t group, uint32_t now);
   void replay_(uint8_t group, uint32_t now);
+  void draw_(Frame &frame, uint8_t group, int8_t state, uint32_t elapsed) const;
   std::array<GroupConfig, 4> configs_{};
   std::array<GroupState, 4> states_{};
   std::array<ReplayValue, 4> replay_values_{};
   bool connected_{false}, dirty_{true};
   float brightness_{0.5f};
+  std::optional<uint32_t> test_started_;
 };
 }  // namespace esphome::casita_status

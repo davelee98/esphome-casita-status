@@ -52,6 +52,12 @@ casita_status:
       type: status
       enabled: false
 
+button:
+  - platform: template
+    name: Casita Self Test
+    on_press:
+      - casita_status.run_test: casita_board
+
 globals:
   - id: checking_output
     type: bool
@@ -79,18 +85,18 @@ interval:
           if (!id(checking_output)) return;
           auto *output = static_cast<esphome::light::AddressableLight *>(id(rgb_module).get_output());
           // Inspect raw bytes after assignment through ESPHome's actual color correction.
-          for (int pixel : {5, 6, 7})
+          for (int pixel : {6, 7, 8})
             id(maroon_min) = std::min(id(maroon_min), int((*output)[pixel].get_red_raw()));
-          for (int pixel : {3, 2, 1}) {
+          for (int pixel : {4, 3, 2}) {
             const auto view = (*output)[pixel];
             id(unknown_min) = std::min(id(unknown_min), int(view.get_red_raw()));
             id(unknown_min) = std::min(id(unknown_min), int(view.get_green_raw()));
             id(unknown_min) = std::min(id(unknown_min), int(view.get_blue_raw()));
           }
-          for (int pixel : {8, 9, 0}) {
+          for (int pixel : {9, 0, 1}) {
             const auto view = (*output)[pixel];
             id(dark_pixels_ok) &= view.get_red_raw() == 0 && view.get_green_raw() == 0 && view.get_blue_raw() == 0;
           }
-          const auto center = (*output)[4];
+          const auto center = (*output)[5];
           id(saw_notch) |= center.get_red_raw() == 0 && center.get_green_raw() == 0 && center.get_blue_raw() == 0;
           id(saw_center_on) |= center.get_red_raw() > 0 && center.get_green_raw() > 0;

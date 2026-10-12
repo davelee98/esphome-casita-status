@@ -22,6 +22,7 @@ SetGroupValueAction = ns.class_("SetGroupValueAction", automation.Action)
 SetGroupUnavailableAction = ns.class_("SetGroupUnavailableAction", automation.Action)
 SetGroupEnabledAction = ns.class_("SetGroupEnabledAction", automation.Action)
 SetBrightnessAction = ns.class_("SetBrightnessAction", automation.Action)
+RunTestAction = ns.class_("RunTestAction", automation.Action)
 SetSuspendedAction = ns.class_("SetSuspendedAction", automation.Action)
 
 
@@ -205,6 +206,11 @@ async def suspend_to_code(config, action_id, template_arg, args):
 @automation.register_action("casita_status.resume", SetSuspendedAction, SUSPEND_SCHEMA, synchronous=True)
 async def resume_to_code(config, action_id, template_arg, args):
     return cg.new_Pvariable(action_id, template_arg, await cg.get_variable(config[CONF_ID]), False)
+
+
+@automation.register_action("casita_status.run_test", RunTestAction, SUSPEND_SCHEMA, synchronous=True)
+async def run_test_to_code(config, action_id, template_arg, args):
+    return cg.new_Pvariable(action_id, template_arg, await cg.get_variable(config[CONF_ID]))
 
 
 async def action_code(config, action_id, template_arg, args, fields):

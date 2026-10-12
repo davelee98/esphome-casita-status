@@ -44,6 +44,7 @@ class CasitaStatus final : public Component {
   void set_group_enabled(const std::string &group, bool enabled);
   void set_global_brightness(float percent);
   void set_suspended(bool suspended);
+  void run_test();
  protected:
   void sensor_value_(uint8_t group, float value);
   void connection_(uint32_t now);
@@ -76,6 +77,13 @@ template<typename... Ts> class SetSuspendedAction final : public Action<Ts...> {
  protected:
   CasitaStatus *parent_;
   bool suspended_;
+};
+template<typename... Ts> class RunTestAction final : public Action<Ts...> {
+ public:
+  explicit RunTestAction(CasitaStatus *parent) : parent_(parent) {}
+  void play(const Ts &...x) override { parent_->run_test(); }
+ protected:
+  CasitaStatus *parent_;
 };
 template<typename... Ts> class SetGroupValueAction final : public Action<Ts...> {
  public:
