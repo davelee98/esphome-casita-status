@@ -17,7 +17,7 @@ CasitaStatus = ns.class_("CasitaStatus", cg.Component)
 BrightnessNumber = ns.class_("BrightnessNumber", number.Number)
 InputType = ns.enum("InputType", is_class=True)
 SourceKind = ns.enum("SourceKind", is_class=True)
-TYPES = {name: getattr(InputType, name.upper()) for name in ("status", "co2", "aqi", "voc", "pm25", "nox")}
+TYPES = {name: getattr(InputType, name.upper()) for name in ("status", "co2", "aqi", "voc", "pm25", "nox", "worst")}
 SetGroupValueAction = ns.class_("SetGroupValueAction", automation.Action)
 SetGroupUnavailableAction = ns.class_("SetGroupUnavailableAction", automation.Action)
 SetGroupEnabledAction = ns.class_("SetGroupEnabledAction", automation.Action)
@@ -48,10 +48,38 @@ GROUP_SCHEMA = cv.Schema({
     cv.Optional(CONF_SENSOR): cv.use_id(sensor.Sensor),
     cv.Optional("enabled", default=True): cv.boolean,
     cv.Optional("ttl"): ttl,
+    cv.Optional("of"): cv.ensure_list(cv.one_of(*GROUPS, lower=True)),
     cv.Optional("state", default={}): text_sensor.text_sensor_schema(
         text_sensor.TextSensor, entity_category="diagnostic"
     ),
 })
+
+
+def validate_worst(config):
+    """A worst group takes no input and follows only non-worst groups other than itself."""
+    groups = config["groups"]
+    for name, group in groups.items():
+        with cv.prepend_path(["groups", name]):
+            if group[CONF_TYPE] != "worst":
+                if "of" in group:
+                    raise cv.Invalid("'of' is only valid on type: worst groups", path=["of"])
+                continue
+            for key in (CONF_SENSOR, "ttl"):
+                if key in group:
+                    raise cv.Invalid(f"type: worst follows other groups and takes no {key}", path=[key])
+            sources = group.get("of", [])
+            if not sources:
+                raise cv.Invalid("type: worst requires 'of', the groups it follows", path=["of"])
+            if len(set(sources)) != len(sources):
+                raise cv.Invalid("'of' lists a group more than once", path=["of"])
+            for source in sources:
+                if source == name:
+                    raise cv.Invalid("a worst group cannot follow itself", path=["of"])
+                if groups[source][CONF_TYPE] == "worst":
+                    raise cv.Invalid(f"a worst group cannot follow another worst group ({source})", path=["of"])
+    return config
+
+
 def diagnostic_defaults(config):
     for name, group in config.get("groups", {}).items():
         if name in GROUPS and "state" not in group:
@@ -73,6 +101,7 @@ CONFIG_SCHEMA = cv.All(
         ),
         cv.Required("groups"): cv.Schema({cv.Required(group): GROUP_SCHEMA for group in GROUPS}),
     }).extend(cv.COMPONENT_SCHEMA),
+    validate_worst,
 )
 
 # Conservative defaults: unknown platforms or filters need an explicit TTL.
@@ -94,6 +123,8 @@ def filters_publish_every_update(filters):
 
 def resolve_source(group, owner, bound_sensor, initialization_ms):
     """Resolve source/freshness from validated sensor and parent configs."""
+    if group[CONF_TYPE] == "worst":
+        return "DERIVED", 0, initialization_ms
     if owner is None:
         source = "ACTION"
         default_ttl = {"status": 0, "co2": 300000, "voc": 300000, "pm25": 300000, "nox": 300000,
@@ -185,9 +216,13 @@ async def to_code(config):
         group = config["groups"][name]
         entity = await text_sensor.new_text_sensor(group["state"])
         bound_sensor = await cg.get_variable(group[CONF_SENSOR]) if CONF_SENSOR in group else cg.nullptr
+        sources = group.get("of", [])
+        worst_of = sum(1 << GROUPS.index(source) for source in sources)
+        # A worst group has no sensor; its diagnostics name the groups it follows instead.
+        sensor_id = "+".join(sources) if sources else str(group.get(CONF_SENSOR, "none"))
         cg.add(var.configure_group(index, TYPES[group[CONF_TYPE]], getattr(SourceKind, group["_source"]),
                                    group["enabled"], group["_ttl_ms"], group["_initialization_ms"], bound_sensor,
-                                   str(group.get(CONF_SENSOR, "none")), entity))
+                                   sensor_id, entity, worst_of))
 
 
 def group_name(value):

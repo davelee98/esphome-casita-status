@@ -6,8 +6,9 @@
 
 namespace esphome::casita_status {
 
-enum class InputType : uint8_t { STATUS, CO2, AQI, VOC, PM25, NOX };
-enum class SourceKind : uint8_t { ACTION, LOCAL, HOME_ASSISTANT };
+enum class InputType : uint8_t { STATUS, CO2, AQI, VOC, PM25, NOX, WORST };
+// DERIVED groups take no input; type worst follows the states of other groups.
+enum class SourceKind : uint8_t { ACTION, LOCAL, HOME_ASSISTANT, DERIVED };
 enum class SubmitResult : uint8_t { ACCEPTED, INVALID, DISABLED, WRONG_SOURCE, PENDING_CONNECTION };
 constexpr int8_t OFF = 0, UNKNOWN = -1, INITIALIZING = -2;
 constexpr std::array<const char *, 4> GROUP_NAMES{{"left", "right", "center", "top"}};
@@ -27,6 +28,7 @@ struct GroupConfig {
   bool enabled{true};
   uint32_t ttl_ms{0};  // Zero means never; Python permits it only for action status or HA.
   uint32_t initialization_ms{30000};
+  uint8_t worst_of{0};  // DERIVED only: bit i set means group i is a source.
 };
 struct GroupState {
   int8_t display_state{INITIALIZING};
@@ -78,6 +80,8 @@ class Board {
   void transition_(uint8_t group, int8_t state, uint32_t now);
   void initialize_(uint8_t group, uint32_t now);
   void replay_(uint8_t group, uint32_t now);
+  // Recomputes every enabled DERIVED group; runs at the end of each state change.
+  void derive_(uint32_t now);
   void draw_(Frame &frame, uint8_t group, int8_t state, uint32_t elapsed) const;
   std::array<GroupConfig, 4> configs_{};
   std::array<GroupState, 4> states_{};

@@ -83,7 +83,8 @@ All four groups must be configured. Each one has a fixed position on the module:
 
 | Option | Required | Description |
 |---|---|---|
-| `type` | yes | How the value is interpreted: `status`, `co2`, `aqi`, `pm25`, `voc`, or `nox`. See [Values](#values). |
+| `type` | yes | How the value is interpreted: `status`, `co2`, `aqi`, `pm25`, `voc`, or `nox`. See [Values](#values). Or `worst`, which shows the worst status of other groups; see [Worst of other groups](#worst-of-other-groups). |
+| `of` | `worst` only | The groups a `worst` group follows, for example `[top, left, right]`. |
 | `sensor` | no | ID of a numeric sensor that feeds this group. Omit it to drive the group with actions. See [Sources](#sources). |
 | `enabled` | no | Whether the group is on at boot. Default `true`. A disabled group stays dark. |
 | `ttl` | no | How long a value stays current before the group shows Unknown. A positive duration such as `10min`, or `never` for action-driven `status` groups. Not allowed on Home Assistant sensors. |
@@ -147,7 +148,35 @@ casita_status:
       sensor: room_co2      # TTL defaults to 3 x 60s
 ```
 
+**Worst of other groups.** See [below](#worst-of-other-groups); a `worst` group takes no source of its own.
+
 **Actions.** Omit `sensor` and set values with `casita_status.set_group_value` or the Home Assistant action. Values are not restored after a reboot, so the caller must resend them. The default TTL is `never` for `status`, 5 minutes for `co2`, `pm25`, `voc`, and `nox`, and 30 minutes for `aqi`. If a value already exists as a Home Assistant entity, bind it as a sensor instead.
+
+### Worst of other groups
+
+A group with `type: worst` shows the worst (highest) status of the groups listed in `of`, using the statuses Casita has already resolved, so it needs no sensor, lookup table, or template:
+
+```yaml
+casita_status:
+  groups:
+    top:
+      type: pm25
+      sensor: room_pm25
+    left:
+      type: voc
+      sensor: room_voc
+    right:
+      type: nox
+      sensor: room_nox
+    center:
+      type: worst
+      of: [top, left, right]
+```
+
+- Groups that are Off, Unknown, or Initializing are ignored. If none of the listed groups has a status, the `worst` group shows Initializing while any of them is still Initializing, and Unknown otherwise.
+- It updates in the same loop as its sources, with no polling delay, and has no TTL or initialization deadline of its own: it follows its sources' deadlines.
+- `sensor` and `ttl` are not allowed. `of` must list at least one group other than itself, each once, and none of type `worst`.
+- `set_group_value` and `set_group_unavailable` are rejected with a warning. `set_group_enabled` works: a disabled `worst` group stays Off and recomputes as soon as it is re-enabled.
 
 ## Actions
 

@@ -13,8 +13,8 @@ static const char *const EFFECT = "Casita Status Renderer";
 void BrightnessNumber::control(float value) { parent_->set_global_brightness(value); }
 void CasitaStatus::configure_group(uint8_t group, InputType type, SourceKind source, bool enabled, uint32_t ttl,
                                   uint32_t initialization, sensor::Sensor *sensor, const char *sensor_id,
-                                  text_sensor::TextSensor *diagnostic) {
-  board_.configure(group, {type, source, enabled, ttl, initialization});
+                                  text_sensor::TextSensor *diagnostic, uint8_t worst_of) {
+  board_.configure(group, {type, source, enabled, ttl, initialization, worst_of});
   sensors_[group] = sensor;
   sensor_ids_[group] = sensor_id;
   diagnostics_[group] = diagnostic;
@@ -132,7 +132,8 @@ void CasitaStatus::set_group_value(const std::string &group, double value) {
   const int index = resolve_group_(group);
   if (index < 0 || !initialized_) return;
   const auto result = board_.submit(index, value, false, millis());
-  if (result == SubmitResult::WRONG_SOURCE) ESP_LOGW(TAG, "%s: set_group_value rejected on sensor-bound group", group.c_str());
+  if (result == SubmitResult::WRONG_SOURCE)
+    ESP_LOGW(TAG, "%s: set_group_value rejected on sensor-bound or worst group", group.c_str());
   if (result == SubmitResult::INVALID) ESP_LOGW(TAG, "%s: invalid action value %g", group.c_str(), value);
   if (result == SubmitResult::DISABLED) ESP_LOGD(TAG, "%s: dropped update while disabled", group.c_str());
   report_("action value");
@@ -140,6 +141,10 @@ void CasitaStatus::set_group_value(const std::string &group, double value) {
 void CasitaStatus::set_group_unavailable(const std::string &group) {
   const int index = resolve_group_(group);
   if (index < 0 || !initialized_) return;
+  if (board_.config(index).source == SourceKind::DERIVED) {
+    ESP_LOGW(TAG, "%s: set_group_unavailable rejected on worst group; it follows its sources", group.c_str());
+    return;
+  }
   board_.set_unavailable(index, millis());
   report_("explicit unavailable");
 }
