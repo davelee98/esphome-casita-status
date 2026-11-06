@@ -189,6 +189,42 @@ def test_run_test_button(tmp_path):
     assert "casita_status.run_test" in result.stdout
 
 
+def test_worst_resolves_as_derived():
+    assert component.resolve_source({CONF_TYPE: "worst"}, None, None, 30000) == ("DERIVED", 0, 30000)
+
+
+def test_worst_group(tmp_path):
+    path = fixture_config(tmp_path)
+    path.write_text(path.read_text().replace("center:\n      type: status",
+                                             "center:\n      type: worst\n      of: [left, right, top]"))
+    result = run_config(path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "_source: DERIVED" in result.stdout
+
+
+@pytest.mark.parametrize("center, other, message", [
+    ("type: worst", "", "requires 'of'"),
+    ("type: worst\n      of: [center]", "", "cannot follow itself"),
+    ("type: worst\n      of: [left, left]", "", "more than once"),
+    ("type: worst\n      of: [top]", "type: worst\n      of: [left]", "another worst group"),
+    ("type: worst\n      of: [left]\n      ttl: 5min", "", "takes no ttl"),
+    ("type: worst\n      of: [left]\n      sensor: wifi_rssi", "", "takes no sensor"),
+    ("type: status\n      of: [left]", "", "only valid on type: worst"),
+])
+def test_worst_group_rules(tmp_path, center, other, message):
+    path = fixture_config(tmp_path, """sensor:
+  - platform: wifi_signal
+    id: wifi_rssi
+""")
+    text = path.read_text().replace("center:\n      type: status", "center:\n      " + center)
+    if other:
+        text = text.replace("top:\n      type: status", "top:\n      " + other)
+    path.write_text(text)
+    result = run_config(path)
+    assert result.returncode != 0
+    assert message in result.stdout + result.stderr
+
+
 def test_no_deep_sleep_binding(tmp_path):
     path = tmp_path / "config.yaml"
     path.write_text(f"""esphome:

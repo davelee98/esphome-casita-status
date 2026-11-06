@@ -16,4 +16,5 @@ void test_mapping();
 void test_lookups();
 void test_state();
 void test_sources();
+void test_worst();
 void test_renderer();

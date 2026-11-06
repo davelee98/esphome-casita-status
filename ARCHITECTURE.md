@@ -1,8 +1,8 @@
 # Casita Status Board Architecture
 
 Status: Proposed  
-Version: 0.17
-Last updated: 2026-10-12
+Version: 0.18
+Last updated: 2026-11-06
 
 ## 1. Purpose
 
@@ -261,6 +261,7 @@ Every enabled group has exactly one source. The source kind determines how the g
 | Local sensor | `sensor:` referencing a sensor attached to this device | Next sensor publish | TTL | Greater of the global initialization timeout and the group's TTL |
 | Home Assistant entity | `sensor:` referencing a `platform: homeassistant` sensor | Automatic: Home Assistant sends current entity state when it connects | Home Assistant disconnection; the entity's own `unavailable`/`unknown` state while connected | Global initialization timeout, restarted at each Home Assistant connection |
 | Action-driven | No `sensor:` | None; the caller must resend | TTL | Global initialization timeout |
+| Derived (`worst`) | `type: worst` with `of:` | Recomputed whenever a source group changes | None of its own; follows its sources | None of its own; follows its sources |
 
 The source kind is inferred at configuration validation from the platform of the referenced sensor. There is no separate source key that could contradict the binding.
 
@@ -291,6 +292,8 @@ At boot, a Home Assistant-sourced group starts Initializing with the global wind
 | `voc` | 5 minutes |
 | `nox` | 5 minutes |
 | `aqi` | 30 minutes |
+
+**Derived groups.** A `type: worst` group takes no input. Its display state is recomputed in the core after every state change of any group: the highest status from 1 through 6 among the groups listed in `of`, ignoring Off, Unknown/Unavailable, and Initializing sources. With no such status it is Initializing while any source is Initializing, and Unknown/Unavailable otherwise. It has no TTL or initialization deadline and is skipped by the deadline check; it reaches Unknown/Unavailable only through its sources. Validation rejects `sensor` and `ttl` on it, an empty `of`, duplicates, itself, and other `worst` groups, so derived states depend only on non-derived groups and one recomputation pass is always complete.
 
 For local-sensor and action-driven groups, a positive per-group `ttl` overrides the default. `never` is allowed only for action-driven `type: status` groups. Expiry occurs when `now - last_valid_at >= ttl` and resolves to Unknown/Unavailable.
 
@@ -346,6 +349,7 @@ Every group configures exactly one input `type`. A normal update therefore conta
 | `pm25` | finite PM2.5 concentration in µg/m³ | Translate through the PM2.5 lookup table. |
 | `voc` | finite Sensirion VOC Index | Translate through the VOC lookup table. |
 | `nox` | finite Sensirion NOx Index | Translate through the NOx lookup table. |
+| `worst` | none | No value; derived from other groups' resolved statuses (Section 8.5). |
 
 The public interface does not accept named normal states. Any string supplied as a normal status is invalid. Off, Unknown/Unavailable, and Initializing remain separate resolved meta-states. Off is controlled through enablement, Unknown/Unavailable has an explicit invalidation action, and Initializing is lifecycle-controlled only.
 
@@ -470,7 +474,7 @@ Local ESPHome automations also expose `casita_status.suspend` and `casita_status
 
 `casita_status.run_test` starts a fixed self-test, accepting either a component ID directly or an `id:` mapping. It is intended for a template button in the device YAML and is not a Home Assistant service. The sequence is fixed policy: a white dot walks the chain from index 0 through 9 at 400 ms per pixel; every group then shows statuses 1 through 6 for 2 seconds each; finally every group shows Initializing and then Unknown/Unavailable for 3 seconds each, about 22 seconds in total. The test lights every group, including disabled ones, so the module and LED order can be checked by eye. It overlays only the rendered frame: group states, sensor updates, deadlines, and diagnostics continue underneath, and the next frame after the test shows the current states. Calling it again restarts the sequence. It is ignored with a warning while the renderer is suspended, and it is not persisted across reboot.
 
-`set_group_value` is the sole normal-state operation for action-driven groups. The group configuration supplies its type. Calling `set_group_value` on a sensor-bound group is rejected with a warning log, because an action value would bypass that group's freshness rules and be silently overwritten by the next sensor publish. `set_group_unavailable` and `set_group_enabled` apply to every group regardless of source. For a group configured as `status`, the action accepts a finite numeric value whose mathematical value is integral and within 1 through 6; `4` and `4.0` are valid, while `4.0001`, strings, and booleans are invalid. Groups configured as `co2`, `aqi`, `pm25`, `voc`, or `nox` translate the value through the corresponding lookup table.
+`set_group_value` is the sole normal-state operation for action-driven groups. The group configuration supplies its type. Calling `set_group_value` on a sensor-bound group is rejected with a warning log, because an action value would bypass that group's freshness rules and be silently overwritten by the next sensor publish. `set_group_unavailable` and `set_group_enabled` apply to every group regardless of source, except that a `worst` group, whose state always reflects its sources, rejects `set_group_unavailable` (and `set_group_value`) with a warning. For a group configured as `status`, the action accepts a finite numeric value whose mathematical value is integral and within 1 through 6; `4` and `4.0` are valid, while `4.0001`, strings, and booleans are invalid. Groups configured as `co2`, `aqi`, `pm25`, `voc`, or `nox` translate the value through the corresponding lookup table.
 
 Action-driven groups accept the same semantic actions from local ESPHome automations and Home Assistant. If multiple producers target one action-driven group, the last call processed on the ESPHome main loop wins. Applications that need priority, timestamps, or arbitration must implement that policy upstream.
 
@@ -704,7 +708,7 @@ casita_status:
 
 The physical map, colors, fills, effects, animation timings, and 50 ms animated render interval ship as built-in Casita policy and are not user configuration. `brightness` is the only visual option.
 
-Every configured group declares exactly one type and at most one `sensor`. The source kind is inferred from the bound sensor's platform (Section 8.5). Per-group `enabled` defaults to true and determines boot enablement; runtime changes are not persisted. The global `initialization_timeout` defaults to 30 seconds and determines each group's initialization window together with its source policy. `ttl` is optional for local-sensor and action-driven groups and is rejected on Home Assistant-sourced groups; when omitted, it uses the defaults in Section 8.5 where they can be safely derived. Brightness accepts 25% through 100% with a 50% default, subject to physical validation of the provisional floor.
+Every configured group declares exactly one type and at most one `sensor`. A `type: worst` group instead lists the groups it follows in `of` and takes no `sensor` or `ttl`. The source kind is inferred from the bound sensor's platform (Section 8.5). Per-group `enabled` defaults to true and determines boot enablement; runtime changes are not persisted. The global `initialization_timeout` defaults to 30 seconds and determines each group's initialization window together with its source policy. `ttl` is optional for local-sensor and action-driven groups and is rejected on Home Assistant-sourced groups; when omitted, it uses the defaults in Section 8.5 where they can be safely derived. Brightness accepts 25% through 100% with a 50% default, subject to physical validation of the provisional floor.
 
 ## 20. Testing strategy
 

@@ -37,7 +37,7 @@ class CasitaStatus final : public Component {
 #endif
   void configure_group(uint8_t group, InputType type, SourceKind source, bool enabled, uint32_t ttl,
                        uint32_t initialization, sensor::Sensor *sensor, const char *sensor_id,
-                       text_sensor::TextSensor *diagnostic);
+                       text_sensor::TextSensor *diagnostic, uint8_t worst_of);
   void render(light::AddressableLight &output, bool initial_run);
   void set_group_value(const std::string &group, double value);
   void set_group_unavailable(const std::string &group);

@@ -15,18 +15,18 @@ const char *state_name(int8_t state) {
   return state >= INITIALIZING && state <= 6 ? NAMES[state + 2] : "unknown_unavailable";
 }
 const char *type_name(InputType type) {
-  static constexpr const char *NAMES[]{"status", "co2", "aqi", "voc", "pm25", "nox"};
+  static constexpr const char *NAMES[]{"status", "co2", "aqi", "voc", "pm25", "nox", "worst"};
   return NAMES[static_cast<uint8_t>(type)];
 }
 const char *source_name(SourceKind source) {
-  static constexpr const char *NAMES[]{"action", "local", "homeassistant"};
+  static constexpr const char *NAMES[]{"action", "local", "homeassistant", "derived"};
   return NAMES[static_cast<uint8_t>(source)];
 }
 uint32_t default_action_ttl(InputType type) {
   return type == InputType::STATUS ? 0 : type == InputType::AQI ? 1800000 : 300000;
 }
 int8_t translate(InputType type, double value) {
-  if (!std::isfinite(value)) return UNKNOWN;
+  if (!std::isfinite(value) || type == InputType::WORST) return UNKNOWN;
   if (type == InputType::STATUS)
     return value >= 1 && value <= 6 && std::floor(value) == value ? static_cast<int8_t>(value) : UNKNOWN;
   if (type == InputType::VOC || type == InputType::NOX) {
@@ -61,6 +61,7 @@ void Board::boot(uint32_t now) {
     states_[i].display_state = configs_[i].enabled ? INITIALIZING : OFF;
     states_[i].resolved_since = now;
   }
+  derive_(now);
 }
 void Board::transition_(uint8_t group, int8_t state, uint32_t now) {
   auto &runtime = states_[group];
@@ -96,6 +97,7 @@ SubmitResult Board::submit(uint8_t group, double value, bool from_sensor, uint32
   if (state != UNKNOWN) runtime.last_valid_at = now;
   else ++runtime.rejected_updates;
   transition_(group, state, now);
+  derive_(now);
   return state == UNKNOWN ? SubmitResult::INVALID : SubmitResult::ACCEPTED;
 }
 void Board::replay_(uint8_t group, uint32_t now) {
@@ -113,6 +115,7 @@ void Board::set_connected(bool connected, uint32_t now) {
       replay_(i, now);
     } else transition_(i, UNKNOWN, now);
   }
+  derive_(now);
 }
 void Board::set_enabled(uint8_t group, bool enabled, uint32_t now) {
   auto &runtime = states_[group];
@@ -126,9 +129,13 @@ void Board::set_enabled(uint8_t group, bool enabled, uint32_t now) {
     runtime.last_valid_at.reset();
     transition_(group, OFF, now);
   }
+  derive_(now);
 }
 void Board::set_unavailable(uint8_t group, uint32_t now) {
+  // A derived state always reflects its sources, so it cannot be overridden.
+  if (configs_[group].source == SourceKind::DERIVED) return;
   if (states_[group].display_state != OFF) transition_(group, UNKNOWN, now);
+  derive_(now);
 }
 void Board::tick(uint32_t now) {
   if (test_started_ && uint32_t(now - *test_started_) >= TEST_DURATION_MS) {
@@ -138,11 +145,30 @@ void Board::tick(uint32_t now) {
   for (uint8_t i = 0; i < 4; ++i) {
     const auto &config = configs_[i];
     const auto &runtime = states_[i];
+    // Derived groups have no deadlines of their own; they follow their sources' deadlines.
+    if (config.source == SourceKind::DERIVED) continue;
     if (runtime.display_state == INITIALIZING && uint32_t(now - runtime.resolved_since) >= config.initialization_ms)
       transition_(i, UNKNOWN, now);
     else if (runtime.display_state > OFF && config.ttl_ms && runtime.last_valid_at &&
              uint32_t(now - *runtime.last_valid_at) >= config.ttl_ms)
       transition_(i, UNKNOWN, now);
+  }
+  derive_(now);
+}
+void Board::derive_(uint32_t now) {
+  for (uint8_t i = 0; i < 4; ++i) {
+    const auto &config = configs_[i];
+    if (config.source != SourceKind::DERIVED || states_[i].display_state == OFF) continue;
+    // Worst valid status among the sources. With none, Initializing while any source still is, else Unknown.
+    int8_t worst = OFF;
+    bool initializing = false;
+    for (uint8_t j = 0; j < 4; ++j) {
+      if (!(config.worst_of & (1u << j))) continue;
+      const int8_t state = states_[j].display_state;
+      if (state > worst) worst = state;
+      else if (state == INITIALIZING) initializing = true;
+    }
+    transition_(i, worst > OFF ? worst : initializing ? INITIALIZING : UNKNOWN, now);
   }
 }
 void Board::set_brightness(float value) {
