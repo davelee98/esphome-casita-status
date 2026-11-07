@@ -1,7 +1,7 @@
 # Casita Status Board Architecture
 
 Status: Proposed  
-Version: 0.18
+Version: 0.19
 Last updated: 2026-11-06
 
 ## 1. Purpose
@@ -544,11 +544,7 @@ light:
     restore_mode: ALWAYS_OFF
     default_transition_length: 0s
     effects:
-      - addressable_lambda:
-          name: Casita Status Renderer
-          update_interval: 50ms
-          lambda: |-
-            id(casita_board).render(it, initial_run);
+      - casita_status:
 ```
 
 This fragment illustrates the required merge mechanism. Extending the existing light preserves its official GPIO 14, ten-pixel WS2812, GRB, and `rmt_symbols: 48` configuration. The package does not override `gamma_correct`; the light keeps ESPHome's default gamma of 2.8, matching the upstream ESK-1 and AIR-1 behavior that the fixed palette assumes. `restore_mode: ALWAYS_OFF` keeps the output dark during setup, avoiding a full-white frame before the renderer starts. The component turns the light on and starts the named renderer effect after both it and the light are ready and keeps the underlying light at 100% brightness. The component applies and encodes global brightness exactly once as defined in Section 12.4.
@@ -561,7 +557,7 @@ The production implementation is a local ESPHome external component under `compo
 
 The minimum supported ESPHome release is 2026.3.0. The component's Python validation enforces this minimum independently of the YAML `esphome.min_version` value, which can be replaced during package merging. Automation actions declare `synchronous=True`, and templatable primitive arguments use the current documented code-generation path. CI also compiles against current stable ESPHome so later API changes are caught promptly.
 
-The addressable-lambda fragment above is only a thin, package-owned bridge that supplies ESPHome's existing addressable buffer to the C++ renderer. It does not contain policy or duplicate rendering logic. The renderer contains:
+The `casita_status` light effect in the fragment above is a thin bridge that the component registers with ESPHome's addressable-effect registry. Every 50 ms it supplies ESPHome's existing addressable buffer to the C++ renderer and schedules output; it contains no policy or rendering logic. Its name, `Casita Status Renderer`, and cadence are fixed by the component, which selects the effect by that name. Versions before 0.19 used an `addressable_lambda` effect whose lambda text validation compared character for character; validation now rejects that form with a migration hint, and device YAML contains no C++. The renderer contains:
 
 - the fixed group-to-pixel map;
 - group state storage;
@@ -569,7 +565,7 @@ The addressable-lambda fragment above is only a thin, package-owned bridge that 
 - non-blocking animation calculations; and
 - complete-frame commit behavior.
 
-The raw light is internal, the bridge is the only configured effect, and the component treats an unexpectedly stopped or replaced bridge as a fault: it logs the event and restores the renderer effect on the next component loop. Rendering is a no-op until the light reports ready, preventing early-boot access to an uninitialized output.
+The raw light is internal, the `casita_status` effect is the only configured effect, and the component treats an unexpectedly stopped or replaced bridge as a fault: it logs the event and restores the renderer effect on the next component loop. Rendering is a no-op until the light reports ready, preventing early-boot access to an uninitialized output.
 
 Suspension leaves the bridge effect and renderer recovery check running. The renderer returns before consuming dirty state or writing pixels; sensor updates, deadlines, connection handling, diagnostics, and brightness changes continue normally. Resume invalidates the cached frame so the next render redraws all current group states, including unchanged steady states. Repeated suspend or resume calls are no-ops. The other component must suspend before its first buffer write and resume after its last, with no idle writes. It supplies its own pixel levels because Casita brightness affects only Casita frames; the underlying light remains at 100%.
 
@@ -612,7 +608,7 @@ Recommended boot sequence:
 2. Apply configured group enablement: enabled groups start Initializing and disabled groups start Off.
 3. Force `prevent_sleep` on and prevent automatic sleep through `deep_sleep_1` during component setup.
 4. Start local sensors and Home Assistant/API connectivity.
-5. Have the component start the renderer bridge after it and `rgb_module` are ready.
+5. Have the component start the renderer effect after it and `rgb_module` are ready.
 6. Resolve each group to an integer status when its first valid input arrives.
 7. Resolve a group to Unknown/Unavailable when its initialization window (Section 8.5) expires without valid data.
 8. When Home Assistant connects, enter Initializing for every enabled Home Assistant-sourced group, then replay any eligible sensor value; otherwise await the subscription's current entity state.
@@ -720,7 +716,7 @@ The C++ core is unit-tested on the host with an injected clock. Python validatio
 4. **Sources:** Home Assistant disconnect invalidates only enabled Home Assistant-sourced groups; reconnect and re-enable recover an unchanged entity's current value; and `set_group_value` on a sensor-bound group is rejected. Test a sensor publication before connection detection: it does not display as current while disconnected, but connect enters Initializing and immediately replays it. Replay accepts values published since boot or the last detected disconnect, including while disabled, and rejects older retained values. A healthy filtered local sensor with a suitable explicit TTL does not falsely expire.
 5. **Renderer:** host tests compare golden ten-pixel frames for each state on one three-LED group and on `center`, and verify that a change to one group leaves the others' pixels unchanged. Renderer recovery redraws the existing states. The self-test walks one pixel at a time in chain order, shows each status and meta-state on every group including disabled ones, leaves group states updating underneath, and hands back to the live frame when it ends. Host tests verify the component's encoded frame; the actual ESPHome gamma/output check runs on-device in item 8.
 6. **Validation:** Python or expected configuration-failure tests enforce the minimum ESPHome version independently of package `min_version`, reject invalid bindings, and require an explicit TTL when local sensor publication cannot be safely inferred. Test a known nested polling output, a publication-suppressing filter, and a configuration without a deep-sleep binding.
-7. **Integration/build:** the fully merged ESK-1 example compiles for ESP32-C6 on the minimum and current ESPHome releases, with one GPIO 14 driver, `rgb_module` internal, one renderer bridge that the component starts, and both sleep protections applied. Verify that the upstream boot automation and buzzer service remain present, and that native API wrappers use one compatible services/actions key. The existing device-check configuration exercises suspend and resume in short and long forms after its output observer finishes; existing validation and builds cover their schema and code generation.
+7. **Integration/build:** the fully merged ESK-1 example compiles for ESP32-C6 on the minimum and current ESPHome releases, with one GPIO 14 driver, `rgb_module` internal, one `casita_status` renderer effect that the component starts, and both sleep protections applied. Verify that the upstream boot automation and buzzer service remain present, and that native API wrappers use one compatible services/actions key. The existing device-check configuration exercises suspend and resume in short and long forms after its output observer finishes; existing validation and builds cover their schema and code generation.
 8. **Device output and physical:** on-device checks with the minimum and current ESPHome test firmware inspect the driver buffer after normal pixel assignment and gamma correction. At minimum brightness, active pulse troughs for maroon and Unknown/Unavailable remain nonzero, while Off pixels remain zero and steady statuses on `center` never go dark. View each adjacent status pair and the meta-states on the module at minimum and default brightness. Confirm readable pulse troughs and that Unknown/Unavailable is distinct from Off. Validate the provisional 25% brightness floor; revise compiled visual policy through an architecture update if readability is unacceptable. On a combined device, render unchanged steady status-1 inputs, run Fortune, and confirm an undisturbed animation followed promptly by the same steady statuses. Check for a white flash or unexpected renderer-recovery warnings.
 
 ## 21. Acceptance criteria

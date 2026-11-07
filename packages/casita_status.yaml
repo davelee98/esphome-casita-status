@@ -19,11 +19,7 @@ light:
     restore_mode: ALWAYS_OFF
     default_transition_length: 0s
     effects:
-      - addressable_lambda:
-          name: Casita Status Renderer
-          update_interval: 50ms
-          lambda: |-
-            id(casita_board).render(it, initial_run);
+      - casita_status:
 
 switch:
   - id: !extend prevent_sleep

@@ -9,8 +9,18 @@
 namespace esphome::casita_status {
 static const char *const TAG = "casita_status";
 static const char *const EFFECT = "Casita Status Renderer";
+static constexpr uint32_t RENDER_INTERVAL_MS = 50;
 
 void BrightnessNumber::control(float value) { parent_->set_global_brightness(value); }
+void CasitaRendererEffect::apply(light::AddressableLight &it, const Color & /*current_color*/) {
+  // Same cadence and output scheduling as ESPHome's addressable_lambda effect, which this replaces.
+  const uint32_t now = millis();
+  if (!initial_run_ && now - last_run_ < RENDER_INTERVAL_MS) return;
+  last_run_ = now;
+  parent_->render(it, initial_run_);
+  initial_run_ = false;
+  it.schedule_show();
+}
 void CasitaStatus::configure_group(uint8_t group, InputType type, SourceKind source, bool enabled, uint32_t ttl,
                                   uint32_t initialization, sensor::Sensor *sensor, const char *sensor_id,
                                   text_sensor::TextSensor *diagnostic, uint8_t worst_of) {
@@ -49,7 +59,7 @@ bool CasitaStatus::validate_output_() {
   if (output_ != nullptr) return true;
   if (!light_->is_ready()) return false;
   if (light_->get_effect_count() != 1 || light_->get_effect_index(EFFECT) == 0) {
-    ESP_LOGE(TAG, "Expected the single package-owned renderer effect");
+    ESP_LOGE(TAG, "Expected the single casita_status renderer effect");
     mark_failed();
     return false;
   }
