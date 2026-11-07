@@ -61,7 +61,7 @@ Build this as a local ESPHome external component with a thin YAML integration la
 - Put state resolution, typed lookup translation, animation, and full-frame rendering in non-blocking C++.
 - Target ESPHome 2026.3.0 or newer, enforce the minimum in component Python validation, and register component automation actions as synchronous.
 - Reference the existing ESK-1 addressable-light instance instead of declaring another GPIO 14 driver.
-- Extend the existing `rgb_module` declaration by ID, mark it internal, preserve `rmt_symbols: 48`, and use only the package-owned renderer bridge effect.
+- Extend the existing `rgb_module` declaration by ID, mark it internal, preserve `rmt_symbols: 48`, and give it only the `casita_status` renderer effect, which the component registers; never an `addressable_lambda` bridge.
 - Have the component start the renderer effect when the light is ready and restore it if stopped; renderer recovery redraws existing group states.
 - Keep the raw light off during setup with `restore_mode: ALWAYS_OFF`; the component turns it on with the renderer to avoid a full-white startup frame.
 - Keep the raw ten-pixel light internal.
@@ -84,7 +84,7 @@ A large collection of YAML globals, scripts, and duplicated lambdas is acceptabl
 ## Guardrails
 
 - Do not expose raw pixel numbers as the normal user interface.
-- Do not let multiple components write to the raw light concurrently. Automations, partitions, and additional effects must not write pixels; shared ownership uses local suspend/resume actions while the renderer bridge stays running.
+- Do not let multiple components write to the raw light concurrently. Automations, partitions, and additional effects must not write pixels; shared ownership uses local suspend/resume actions while the renderer effect stays running.
 - Do not assume logical groups are contiguous numeric ranges.
 - Do not restore an old measurement as current after boot; begin enabled groups in `Initializing`.
 - Map missing, invalid, `NaN`, infinite, expired, or unrecognized source data to `UnknownUnavailable`.

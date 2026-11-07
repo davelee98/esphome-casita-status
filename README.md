@@ -14,7 +14,7 @@ The device YAML includes two packages, in this order: the official ESK-1 configu
 
 - loads the `casita_status` external component;
 - declares `casita_status:` with `id: casita_board`, the ESK-1 `rgb_module` light, and the ESK-1 deep-sleep component;
-- extends `rgb_module` to make it internal, keep it off until the renderer starts, and add the single renderer effect;
+- extends `rgb_module` to make it internal, keep it off until the renderer starts, and add the single renderer effect, `- casita_status:`;
 - forces the ESK-1 `prevent_sleep` switch on so the board stays awake; and
 - adds native API actions for Home Assistant alongside ESK-1's buzzer action.
 
@@ -66,7 +66,7 @@ casita_status:
 
 The `esk1` package is pinned to an upstream commit so builds are reproducible; change the hash after `@` to adopt a newer ESK-1 release. The other two paths are relative to the device YAML. `casita_components_path` must point at this repository's `components` directory. The package's default (`../components`) only works for files in `examples/`. Keep `secrets.yaml` beside the device YAML. [examples/esk1_basic_status_board.yaml](examples/esk1_basic_status_board.yaml) is a complete example that binds three Home Assistant sensors.
 
-Do not declare another light on GPIO 14, add effects to `rgb_module`, or control `rgb_module` directly. Validation rejects a modified light. Casita owns its pixels except during an explicit handover to another on-device component (see [Sharing the light](#sharing-the-light)).
+Do not declare another light on GPIO 14, add effects to `rgb_module`, or control `rgb_module` directly. If you declare the light yourself instead of using the package, give it exactly one effect, `- casita_status:`, which hands Casita the pixel buffer every 50 ms; it replaces the `addressable_lambda` bridge used before, and validation rejects the old form with a hint. Validation rejects a modified light. Casita owns its pixels except during an explicit handover to another on-device component (see [Sharing the light](#sharing-the-light)).
 
 ## Groups
 

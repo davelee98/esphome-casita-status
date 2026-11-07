@@ -225,7 +225,11 @@ def test_worst_group_rules(tmp_path, center, other, message):
     assert message in result.stdout + result.stderr
 
 
-def test_no_deep_sleep_binding(tmp_path):
+RENDERER_EFFECT = "      - casita_status:\n"
+
+
+def standalone_config(tmp_path, effects=RENDERER_EFFECT):
+    """A light declared without the ESK-1 or Casita packages, as in a hand-written device YAML."""
     path = tmp_path / "config.yaml"
     path.write_text(f"""esphome:
   name: casita-validation
@@ -261,19 +265,37 @@ light:
     default_transition_length: 0s
     internal: true
     effects:
-      - addressable_lambda:
+{effects}""")
+    return path
+
+
+def test_no_deep_sleep_binding(tmp_path):
+    result = run_config(standalone_config(tmp_path))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "casita_status:" in result.stdout and "name: Casita Status Renderer" in result.stdout
+
+
+def test_old_lambda_bridge_is_rejected_with_hint(tmp_path):
+    path = standalone_config(tmp_path, """      - addressable_lambda:
           name: Casita Status Renderer
           update_interval: 50ms
           lambda: id(casita_board).render(it, initial_run);
 """)
     result = run_config(path)
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "replaces the addressable_lambda renderer bridge" in result.stdout + result.stderr
+
+
+def test_renderer_effect_name_is_fixed(tmp_path):
+    result = run_config(standalone_config(tmp_path, "      - casita_status:\n          name: Something Else\n"))
+    assert result.returncode != 0
+    assert "name is fixed" in result.stdout + result.stderr
 
 
 @pytest.mark.parametrize("edit, message", [
     ("num_leds: 9", "num_leds"), ("gamma_correct: 1", "gamma_correct"),
     ("rmt_symbols: 96", "rmt_symbols"), ("internal: false", "internal"),
-    ("effects:\n      - addressable_rainbow:", "only the package-owned"),
+    ("effects:\n      - addressable_rainbow:", "exactly one effect"),
 ])
 def test_raw_light_guardrails(tmp_path, edit, message):
     path = fixture_config(tmp_path, "light:\n  - id: !extend rgb_module\n    " + edit + "\n")

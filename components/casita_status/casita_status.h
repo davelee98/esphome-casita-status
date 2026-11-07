@@ -5,6 +5,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/preferences.h"
 #include "esphome/components/light/addressable_light.h"
+#include "esphome/components/light/addressable_light_effect.h"
 #include "esphome/components/light/light_state.h"
 #include "esphome/components/number/number.h"
 #include "esphome/components/sensor/sensor.h"
@@ -68,6 +69,20 @@ class CasitaStatus final : public Component {
   uint32_t preference_key_{0}, frames_{0};
   bool initialized_{false}, renderer_started_{false}, frame_valid_{false};
   bool suspended_{false};
+};
+
+// The light's only effect (`- casita_status:` under the light's effects). ESPHome runs it while the light is
+// on; every 50 ms it hands the pixel buffer to CasitaStatus::render().
+class CasitaRendererEffect final : public light::AddressableLightEffect {
+ public:
+  explicit CasitaRendererEffect(const char *name) : AddressableLightEffect(name) {}
+  void set_parent(CasitaStatus *parent) { parent_ = parent; }
+  void start() override { initial_run_ = true; }
+  void apply(light::AddressableLight &it, const Color &current_color) override;
+ protected:
+  CasitaStatus *parent_{nullptr};
+  uint32_t last_run_{0};
+  bool initial_run_{true};
 };
 
 template<typename... Ts> class SetSuspendedAction final : public Action<Ts...> {

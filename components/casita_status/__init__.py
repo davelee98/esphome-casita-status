@@ -5,15 +5,20 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 import esphome.final_validate as fv
 from esphome.components import deep_sleep, light, number, sensor, text_sensor
-from esphome.const import CONF_ID, CONF_SENSOR, CONF_TYPE, CONF_VALUE
+from esphome.components.light.effects import register_addressable_effect
+from esphome.components.light.types import AddressableLightEffect
+from esphome.const import CONF_ID, CONF_NAME, CONF_SENSOR, CONF_TYPE, CONF_VALUE
 
 AUTO_LOAD = ["sensor", "text_sensor", "number"]
 DEPENDENCIES = ["light"]
 MULTI_CONF = False
 GROUPS = ("left", "right", "center", "top")
+EFFECT_KEY = "casita_status"  # The light effect's YAML key: `effects: [casita_status: {}]`.
 EFFECT_NAME = "Casita Status Renderer"
+CONF_CASITA_ID = "casita_id"
 ns = cg.esphome_ns.namespace("casita_status")
 CasitaStatus = ns.class_("CasitaStatus", cg.Component)
+CasitaRendererEffect = ns.class_("CasitaRendererEffect", AddressableLightEffect)
 BrightnessNumber = ns.class_("BrightnessNumber", number.Number)
 InputType = ns.enum("InputType", is_class=True)
 SourceKind = ns.enum("SourceKind", is_class=True)
@@ -171,14 +176,13 @@ def final_validate(config):
     if raw["default_transition_length"].total_milliseconds != 0:
         raise cv.Invalid("Casita light requires zero transition time")
     effects = raw.get("effects", [])
-    if len(effects) != 1 or "addressable_lambda" not in effects[0]:
-        raise cv.Invalid("Casita light requires only the package-owned addressable_lambda effect")
-    bridge = effects[0]["addressable_lambda"]
-    if bridge["name"] != EFFECT_NAME or bridge["update_interval"].total_milliseconds != 50:
-        raise cv.Invalid("Casita renderer effect name and 50ms cadence are fixed")
-    expected_bridge = f"id({config[CONF_ID]}).render(it, initial_run);"
-    if "".join(str(bridge["lambda"]).split()) != "".join(expected_bridge.split()):
-        raise cv.Invalid("Use only the package-owned Casita renderer bridge lambda")
+    if len(effects) != 1 or EFFECT_KEY not in effects[0]:
+        hint = (" It replaces the addressable_lambda renderer bridge used before."
+                if any("addressable_lambda" in effect for effect in effects) else "")
+        raise cv.Invalid(f"Casita light requires exactly one effect, '- {EFFECT_KEY}:'.{hint}")
+    # The component selects the effect by name, so the name is fixed.
+    if effects[0][EFFECT_KEY][CONF_NAME] != EFFECT_NAME:
+        raise cv.Invalid(f"The {EFFECT_KEY} effect's name is fixed; remove 'name'")
     for group_name, group in config["groups"].items():
         owner = bound = None
         if CONF_SENSOR in group:
@@ -223,6 +227,16 @@ async def to_code(config):
         cg.add(var.configure_group(index, TYPES[group[CONF_TYPE]], getattr(SourceKind, group["_source"]),
                                    group["enabled"], group["_ttl_ms"], group["_initialization_ms"], bound_sensor,
                                    sensor_id, entity, worst_of))
+
+
+@register_addressable_effect(EFFECT_KEY, CasitaRendererEffect, EFFECT_NAME, {
+    cv.GenerateID(CONF_CASITA_ID): cv.use_id(CasitaStatus),
+})
+async def renderer_effect_to_code(config, effect_id):
+    parent = await cg.get_variable(config[CONF_CASITA_ID])
+    effect = cg.new_Pvariable(effect_id, config[CONF_NAME])
+    cg.add(effect.set_parent(parent))
+    return effect
 
 
 def group_name(value):
